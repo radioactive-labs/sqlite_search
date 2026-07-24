@@ -11,7 +11,8 @@ module SqliteSearch
 
       argument :columns, type: :array, default: [], banner: "column column"
       class_option :weights, type: :string, default: nil, desc: "Comma-separated BM25 weights aligned to columns"
-      class_option :index_name, type: :string, default: nil, desc: "FTS index name (default: <table>_search)"
+      class_option :index, type: :string, default: nil,
+        desc: "Index/scope name; the FTS table becomes <table>_<index>_fts (default: search)"
 
       def create_migration_file
         if options[:weights]
@@ -30,7 +31,7 @@ module SqliteSearch
       def table_name = name.tableize
 
       def index_name
-        options[:index_name] || "#{name.underscore}_search"
+        options[:index] || "search"
       end
 
       def migration_class_suffix = "#{index_name.camelize}Fts5"

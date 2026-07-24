@@ -41,10 +41,18 @@ You can generate this migration instead of writing it by hand:
 rails g sqlite_search:fts5 Post title body --weights 2,1
 ```
 
-This generates `db/migrate/..._create_post_search_fts5.rb` calling `create_fts5_table :posts, :post_search,
-against: { title: 2, body: 1 }, backfill: true`. Omit `--weights` to index columns unweighted (a single
-column becomes `against: :column`, multiple columns become `against: [:a, :b]`). Pass `--index-name` to
-override the default `<model>_search` index name.
+This generates `db/migrate/..._create_search_fts5.rb` calling `create_fts5_table :posts, :search,
+against: { title: 2, body: 1 }, backfill: true` (FTS table `posts_search_fts`). Omit `--weights` to index
+columns unweighted (a single column becomes `against: :column`, multiple columns become `against: [:a, :b]`).
+
+The second argument (`:search` above) is the **index/scope name** — it determines the FTS table name
+(`<table>_<index>_fts`) and the scope you declare on the model. It defaults to `search`; pass `--index` to
+choose another (e.g. when a model needs more than one FTS index):
+
+```
+rails g sqlite_search:fts5 Post body --index by_body
+# => create_fts5_table :posts, :by_body, against: :body   (FTS table posts_by_body_fts)
+```
 
 ### 2. Declare the scope on the model
 
@@ -109,7 +117,10 @@ whenever the index and the base table have drifted (see Limitations below).
 
 ## Limitations
 
-1. **SQLite only.** This gem is built directly on SQLite's `FTS5` virtual table module; the SQLite library
+1. **ActiveRecord 8.0+.** The migration helper and its `schema.rb` round-trip rely on `create_virtual_table`,
+   which was added in Rails 8.0. The gem does **not** work on 7.1 or 7.2 (verified). This is enforced by the
+   gemspec.
+2. **SQLite only.** This gem is built directly on SQLite's `FTS5` virtual table module; the SQLite library
    your app links against must have FTS5 compiled in (true of the `sqlite3` gem's bundled SQLite, and of
    most modern system SQLite builds).
 2. **Integer primary keys only.** FTS5 virtual tables use `rowid` as their key, and SQLite `rowid` is
