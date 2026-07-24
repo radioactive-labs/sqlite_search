@@ -5,6 +5,8 @@ require "sqlite_search/version"
 require "sqlite_search/query"
 require "sqlite_search/fts5"
 require "sqlite_search/migration"
+require "sqlite_search/fts5/definition"
+require "sqlite_search/model"
 
 module SqliteSearch
 end
