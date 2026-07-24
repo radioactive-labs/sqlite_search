@@ -20,11 +20,24 @@ module SqliteSearch
 
         scope name, ->(query = nil, prefix: false, raw: nil) do
           match = raw || SqliteSearch::Query.build(query, prefix: prefix)
-          next none if match.nil? || match.to_s.empty?
+          next none.extending(SqliteSearch::Fts5::NullRank) if match.nil? || match.to_s.empty?
 
           fts = connection.quote_table_name(definition.table_name)
-          pk = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"
-          where("#{pk} IN (SELECT rowid FROM #{fts} WHERE #{fts} MATCH ?)", match)
+          pk  = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"
+
+          # bm25() is only valid in a query that MATCHes the fts table, so
+          # order_by_rank joins the fts table and re-applies MATCH here.
+          rank_module = Module.new do
+            define_method(:order_by_rank) do
+              bm25 = definition.bm25_expression(connection)
+              joins("JOIN #{fts} ON #{fts}.rowid = #{pk}")
+                .where("#{fts} MATCH ?", match)
+                .select("#{connection.quote_table_name(table_name)}.*, -#{bm25} AS #{definition.rank_column}")
+                .order(Arel.sql(bm25))
+            end
+          end
+
+          where("#{pk} IN (SELECT rowid FROM #{fts} WHERE #{fts} MATCH ?)", match).extending(rank_module)
         end
 
         cols = definition.column_names

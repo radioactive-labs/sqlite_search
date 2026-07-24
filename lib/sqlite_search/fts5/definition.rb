@@ -18,6 +18,16 @@ module SqliteSearch
       end
 
       def column_names = columns.map(&:to_s)
+
+      # SQLite bm25() returns lower (more negative) = better. We ORDER BY it
+      # ascending, and expose -bm25 as the rank so higher = better.
+      def bm25_expression(connection)
+        args = [connection.quote_table_name(table_name)]
+        args.concat(weights.map { |w| format("%g", w) }) if weights
+        "bm25(#{args.join(", ")})"
+      end
+
+      def rank_column = "#{name}_rank"
     end
   end
 end

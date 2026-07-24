@@ -16,5 +16,11 @@ module SqliteSearch
     def weights_for(against)
       against.is_a?(Hash) ? against.values.map(&:to_f) : nil
     end
+
+    # Extended onto the .none relation returned for blank queries so that
+    # .order_by_rank chains safely (returns the same empty relation).
+    module NullRank
+      def order_by_rank = self
+    end
   end
 end
