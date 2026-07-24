@@ -1,0 +1,5 @@
+class Create<%= migration_class_suffix %> < ActiveRecord::Migration[<%= migration_version %>]
+  def change
+    create_fts5_table :<%= table_name %>, :<%= index_name %>, against: <%= against_literal %>, backfill: true
+  end
+end
