@@ -1,233 +1,233 @@
 # sqlite_search
 
-Full-text search for ActiveRecord on SQLite, built directly on [FTS5](https://sqlite.org/fts5.html) virtual
-tables. Declare which columns to index, optionally weight them, and get a query scope, prefix search,
-BM25-based relevance ranking, and a reindex path — with no triggers and a schema that round-trips cleanly
-through `schema.rb`. Vector (semantic) search is also available, built on
-[sqlite-vec](https://github.com/asg017/sqlite-vec) through the [`neighbor`](https://github.com/ankane/neighbor)
-gem, with your app supplying embeddings via a callback. Hybrid (FTS5 + vector) search fuses an `fts5_scope`
-and a `vec_scope` via Reciprocal Rank Fusion, with an optional reranking hook.
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-## Install
+**Search that lives in the SQLite file you already ship, not a separate service
+you have to run, sync, and pay for.** Full-text, vector, and hybrid search for
+ActiveRecord, built on the database you already have.
+
+The moment you add search to a SQLite-backed Rails app, the options thin out.
+`pg_search` is Postgres only. A hosted search service is another process to
+deploy, a second copy of your data to keep in sync, and a bill. Hand-rolling
+FTS5 works right up until you are writing raw-SQL migrations for a virtual table
+that will not survive a `schema.rb` dump, keeping the index in sync by hand,
+escaping user input into a `MATCH` expression so one stray quote does not 500
+your search, and then doing all of it again for the next model. sqlite_search
+does that work for you: declare which columns to index and you get a query
+scope, kept in sync, safe against untrusted input, and restorable from
+`schema.rb`.
+
+It covers three kinds of search behind one DSL. Full-text uses SQLite's FTS5
+module with BM25 relevance ranking. Vector (semantic) search uses
+[sqlite-vec](https://github.com/asg017/sqlite-vec) through the
+[`neighbor`](https://github.com/ankane/neighbor) gem, with your app supplying
+embeddings via a callback. Hybrid search fuses the two with Reciprocal Rank
+Fusion and an optional reranking step. There are no database triggers and no
+background service to run. Works on Rails 8.0+.
+
+## 30-second tour
+
+Declare a search index in a migration, add one line to the model, and query it:
+
+```ruby
+# db/migrate/xxxx_create_posts_search.rb
+class CreatePostsSearch < ActiveRecord::Migration[8.0]
+  def change
+    create_fts5_index :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
+  end
+end
+
+# app/models/post.rb
+class Post < ApplicationRecord
+  include SqliteSearch::Model
+  fts5_scope :search, against: { title: 2.0, body: 1.0 }
+end
+
+# anywhere
+Post.search("morning coffee")                    # a normal, chainable relation
+Post.search("coffee").order_by_rank.first.search_rank
+Post.where(author_id: 7).search("coffee")        # searches only that author's posts
+```
+
+The scope is an ordinary `ActiveRecord::Relation`, so it composes with the rest
+of your query. User input is sanitized into a safe `MATCH` expression for you, so
+you can pass `params[:q]` straight through.
+
+## Installation
+
+Add the gem:
 
 ```ruby
 gem "sqlite_search"
 ```
 
-## Usage
+Then `bundle install`. In a Rails app the model concern and the migration
+helpers are wired in automatically. Vector and hybrid search need two more gems;
+see [Vector search](#vector-search).
 
-### 1. Create the FTS5 index in a migration
+## Full-text search
 
-Use the `create_fts5_index` migration helper (mixed into `ActiveRecord::Migration` automatically in a Rails
-app):
+### Create the index in a migration
+
+`create_fts5_index` creates an FTS5 virtual table for a model. It is mixed into
+`ActiveRecord::Migration`, so it is available in any migration:
 
 ```ruby
-class CreateSearchFts5 < ActiveRecord::Migration[8.0]
-  def change
-    create_fts5_index :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
-  end
-end
+create_fts5_index :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
 ```
 
-- `against:` accepts a single column (`:body`), an array (`[:title, :body]`), or a hash of column => BM25
-  weight (`{ title: 2.0, body: 1.0 }`).
-- `tokenizer:` defaults to `"porter unicode61"`.
-- `backfill: true` seeds the new FTS5 table from existing rows in `table` (off by default, e.g. for a
-  brand-new table with no rows yet).
-- The resulting virtual table is named `<table>_<name>_fts` (e.g. `posts_search_fts`) and is created with
-  `create_virtual_table`, so it shows up in `schema.rb` like any other table.
+`against:` takes a single column (`:body`), a list (`[:title, :body]`), or a hash
+of column to BM25 weight (`{ title: 2.0, body: 1.0 }`, weighting title matches
+higher). `tokenizer:` defaults to `"porter unicode61"`, which folds case and
+accents and stems words, so a search for "running" also matches "run".
+`backfill: true` seeds the index from rows that already exist; leave it off for a
+brand-new table.
 
-You can generate this migration instead of writing it by hand:
+The second argument (`:search`) names the index. It becomes the FTS table name
+(`posts_search_fts`) and the scope name on the model, so keep the two in step. A
+`rails g sqlite_search:fts5` generator writes the migration for you:
 
 ```
 rails g sqlite_search:fts5 Post title body --weights 2,1
+rails g sqlite_search:fts5 Post body --index by_body   # a second index on the same model
 ```
 
-This generates `db/migrate/..._create_search_fts5.rb` calling `create_fts5_index :posts, :search,
-against: { title: 2, body: 1 }, backfill: true` (FTS table `posts_search_fts`). Omit `--weights` to index
-columns unweighted (a single column becomes `against: :column`, multiple columns become `against: [:a, :b]`).
+The virtual table is created with `create_virtual_table`, so it appears in
+`schema.rb` and restores cleanly from `db:schema:load`. Nothing is hidden in the
+database.
 
-The second argument (`:search` above) is the **index/scope name** — it determines the FTS table name
-(`<table>_<index>_fts`) and the scope you declare on the model. It defaults to `search`; pass `--index` to
-choose another (e.g. when a model needs more than one FTS index):
-
-```
-rails g sqlite_search:fts5 Post body --index by_body
-# => create_fts5_index :posts, :by_body, against: :body   (FTS table posts_by_body_fts)
-```
-
-### 2. Declare the scope on the model
+### Declare the scope
 
 ```ruby
 class Post < ApplicationRecord
   include SqliteSearch::Model
-
-  fts5_scope :by_body, against: :body
-  # or, weighted across multiple columns:
   fts5_scope :search, against: { title: 2.0, body: 1.0 }
 end
 ```
 
-`fts5_scope` defines a named scope on the model and wires up `after_save_commit` / `after_destroy_commit`
-callbacks that keep the FTS5 table in sync whenever any of the indexed columns change.
+`fts5_scope` defines the `Post.search` scope and wires up `after_save_commit` and
+`after_destroy_commit` callbacks that keep the index in step whenever an indexed
+column changes. A model can declare more than one index (`fts5_scope :by_body,
+against: :body`) and each gets its own scope.
 
-### 3. Query
+### Query
 
 ```ruby
-Post.by_body("coffee")                  # sanitized AND-of-terms match
-Post.by_body("coffee").where(published: true).order(:created_at) # composes with normal AR scopes
-Post.by_body("cof", prefix: true)       # prefix match on the last term
-Post.by_body(raw: "coffee OR tea")      # bypass the sanitizer, pass a raw FTS5 MATCH expression
+Post.search("coffee")                              # AND of the sanitized terms
+Post.search("coffee").where(published: true)       # composes with any AR scope
+Post.search("cof", prefix: true)                   # prefix match on the last term
+Post.search(raw: "coffee OR tea")                  # bypass the sanitizer, pass raw FTS5 syntax
 ```
 
-A blank/nil query (and a call with no positional query, e.g. `Post.by_body(prefix: true)`) returns an empty
-relation (`.none`) rather than matching everything or raising.
+A blank or nil query (including a call with no positional argument, such as
+`Post.search(prefix: true)`) returns `.none` rather than matching everything or
+raising. Any string you pass as the positional argument goes through
+`SqliteSearch::Query`, which keeps quoted phrases and alphanumeric terms and
+strips FTS5 operator syntax, so untrusted input is safe. Reserve `raw:` for
+trusted, internally built expressions.
 
-User-supplied query strings passed as the positional argument are run through `SqliteSearch::Query`, which
-only lets through quoted phrases and alphanumeric/underscore terms (AND-joined), stripping FTS5 operator
-syntax — so it's safe to pass raw user input. Use `raw:` only with trusted/internally-built MATCH
-expressions.
+### Ranking
 
-#### Ranking
+By default the scope filters but does not order, so it composes with your own
+`order`. Ask for relevance ordering explicitly:
 
 ```ruby
 posts = Post.search("coffee").order_by_rank
-posts.first.search_rank # higher is better
+posts.first.search_rank   # higher is more relevant
 ```
 
-`order_by_rank` joins the FTS5 table, re-applies the `MATCH`, and orders by SQLite's `bm25()` (inverted, so
-higher = more relevant). Each scope also exposes a `<name>_rank` reader (e.g. `search_rank` for a scope
-named `:search`) on records loaded via `order_by_rank`, reflecting any per-column weights passed to
-`against:`.
+`order_by_rank` orders by SQLite's `bm25()`, inverted so higher means better, and
+honors the per-column weights from `against:`. Each ranked record carries a
+`<name>_rank` reader (`search_rank` for a scope named `:search`).
 
-### 4. Reindexing
+### Reindexing
+
+Bulk writes that skip callbacks (`insert_all`, `update_all`, raw SQL, another
+connection) leave the index stale. Rebuild it from the base table:
 
 ```ruby
-Post.reindex(:by_body) # rebuild one named FTS5 index
-Post.reindex           # rebuild every fts5_scope defined on the model
+Post.reindex(:search)   # one index
+Post.reindex            # every fts5_scope on the model
 ```
 
-or from the command line:
-
-```
-rake sqlite_search:reindex[Post,by_body]
-rake sqlite_search:reindex[Post]   # scope omitted -> rebuild all
-```
-
-`reindex` truncates and repopulates the FTS5 table directly from the base table, so it's the recovery path
-whenever the index and the base table have drifted (see Limitations below).
+or `rake sqlite_search:reindex[Post,search]` from the command line.
 
 ## Vector search
 
-Semantic (embedding-based, cosine-similarity) search via [sqlite-vec](https://github.com/asg017/sqlite-vec)
-through the [`neighbor`](https://github.com/ankane/neighbor) gem. `sqlite_search` doesn't generate embeddings
-itself — your app supplies them via a callback — it stores them in a `vec0` virtual table and gives you a
-KNN query scope.
-
-This is optional functionality: add the `neighbor` and `sqlite-vec` gems to your Gemfile before using it.
+Semantic search ranks rows by embedding similarity instead of keywords. It uses
+[sqlite-vec](https://github.com/asg017/sqlite-vec) through the
+[`neighbor`](https://github.com/ankane/neighbor) gem. sqlite_search stores and
+queries the vectors; your app produces them. Add both gems, since neither is a
+dependency of sqlite_search itself:
 
 ```ruby
 gem "neighbor"
 gem "sqlite-vec"
 ```
 
-### 1. Register an embedder
+### Register an embedder
+
+sqlite_search calls this block whenever it needs to turn text into a vector, both
+when indexing a row and when running a query, so the same model does both sides:
 
 ```ruby
 SqliteSearch.embedder do |text, model:, scope:|
-  MyEmbeddingClient.embed(text) # returns an Array<Float> matching the scope's `dimensions`
+  MyEmbeddingClient.embed(text)   # returns an Array<Float> of length `dimensions`
 end
 ```
 
-The block receives the text to embed (the configured `against:` columns joined), the model class, and the
-scope name, and must return an `Array<Float>` with exactly `dimensions` elements.
+The block receives the text (the `against:` columns joined), the model, and the
+scope name, so you can route to different embedding models per scope if you want.
 
-### 2. Create the vec index in a migration
-
-Use the `create_vec_index` migration helper:
+### Create the index and declare the scope
 
 ```ruby
-class CreateSemanticVec < ActiveRecord::Migration[8.0]
-  def change
-    create_vec_index :posts, :semantic, dimensions: 768
-  end
-end
+# migration
+create_vec_index :posts, :semantic, dimensions: 768
+
+# model
+vec_scope :semantic, against: [:title, :body], dimensions: 768
 ```
 
-The resulting virtual table is named `<table>_<index>_vec` (e.g. `posts_semantic_vec`) and is created with
-`create_virtual_table`, so it shows up in `schema.rb` like any other table. As with FTS5, you can generate
-this migration instead of writing it by hand:
+The vector table is `posts_semantic_vec`, a `vec0` virtual table that also
+round-trips through `schema.rb`. A `rails g sqlite_search:vec Post --index
+semantic --dimensions 768` generator writes the migration. `create_vec_index`
+does not backfill (there is no text to embed at migration time), so run
+`Post.reembed(:semantic)` once afterward to embed existing rows.
 
-```
-rails g sqlite_search:vec Post --index semantic --dimensions 768
-```
-
-This generates `db/migrate/..._create_semantic_vec.rb` calling `create_vec_index :posts, :semantic,
-dimensions: 768`. `--index` defaults to `semantic`; `--dimensions` is required.
-
-### 3. Declare the scope on the model
-
-```ruby
-class Post < ApplicationRecord
-  include SqliteSearch::Model
-
-  vec_scope :semantic, against: [:title, :body], dimensions: 768
-end
-```
-
-`vec_scope` defines a named scope on the model and wires up `after_save_commit` / `after_destroy_commit`
-callbacks that keep the vec table in sync whenever any of the `against:` columns change. By default,
-embedding happens **asynchronously** via an ActiveJob (`SqliteSearch::EmbedJob`); pass `sync: :inline` to
-embed synchronously in the callback instead (also required if your app doesn't use ActiveJob):
+By default a save enqueues a background `SqliteSearch::EmbedJob` to do the
+embedding, so an expensive embedding call stays out of the request. Pass
+`sync: :inline` to embed inside the callback instead, which you want when the
+embedder is cheap or when your app does not use ActiveJob:
 
 ```ruby
 vec_scope :semantic, against: [:title, :body], dimensions: 768, sync: :inline
 ```
 
-`SqliteSearch::EmbedJob` runs on ActiveJob's `:default` queue unless you route it elsewhere:
+Route the job to a specific queue with `SqliteSearch.config.job_queue = :embeddings`.
+
+### Query
 
 ```ruby
-SqliteSearch.config.job_queue = :embeddings
+Post.semantic("a warm drink to start the day", k: 20, threshold: 0.3)
 ```
 
-### 4. Query
+`k:` caps how many nearest neighbors to fetch (default 20). `threshold:` drops
+hits below a cosine similarity you set. Each returned record exposes a
+`<name>_similarity` reader (a cosine similarity in `[-1, 1]`, higher is closer). A
+blank or nil query returns `.none`.
+
+Re-embed after a bulk write the same way you reindex FTS5:
 
 ```ruby
-Post.semantic("query text", k: 20, threshold: 0.3)
-Post.semantic("query text").where(published: true) # composes with normal AR scopes (see limitations)
+Post.reembed(:semantic)   # or rake sqlite_search:reembed[Post,semantic]
 ```
-
-- `k:` caps the number of nearest neighbors fetched (default 20).
-- `threshold:` (optional) drops hits whose cosine similarity falls below it.
-- A blank/nil query returns an empty relation (`.none`) rather than matching everything or raising.
-- Records loaded via `.semantic` expose a `<name>_similarity` reader (e.g. `semantic_similarity`), a cosine
-  similarity in `[-1, 1]` (higher is more similar).
-
-### 5. Backfilling / re-embedding
-
-```ruby
-Post.reembed(:semantic) # re-embed every row for one named vec index
-Post.reembed            # re-embed every vec_scope defined on the model
-```
-
-or from the command line:
-
-```
-rake sqlite_search:reembed[Post,semantic]
-```
-
-Run this after `create_vec_index` to embed existing rows (the migration itself does not backfill), or
-whenever the vec table and the base table have drifted (e.g. after a bulk update that skipped callbacks).
 
 ## Hybrid search
 
-Hybrid search fuses an `fts5_scope` and a `vec_scope` you've already declared on a model into one query,
-combining BM25 keyword rank and cosine-similarity KNN rank via Reciprocal Rank Fusion (RRF), with an
-optional reranking pass on top.
-
-### 1. Declare the scope
-
-`hybrid_scope` references an existing `fts5_scope` and `vec_scope` by name — declare those first:
+Hybrid search runs a keyword search and a vector search together and fuses their
+rankings, which catches both exact-term matches and semantic ones. It reuses an
+`fts5_scope` and a `vec_scope` you have already declared:
 
 ```ruby
 class Post < ApplicationRecord
@@ -239,139 +239,122 @@ class Post < ApplicationRecord
 end
 ```
 
-- `fts5:` / `vec:` name the `fts5_scope`/`vec_scope` to fuse. They must already be declared on the model —
-  `hybrid_scope` raises `SqliteSearch::Error` at declaration time otherwise.
-- `k:` is the RRF constant (default 60); higher values flatten the influence of rank position. This is a
-  different `k:` than `vec_scope`/`.semantic`'s `k:` (the neighbor count) — same name, different meaning;
-  `hybrid_scope` has no separate neighbor-count option of its own.
-
-### 2. Query
+`fts5:` and `vec:` name the two arms. They must already be declared, or
+`hybrid_scope` raises `SqliteSearch::Error` at load time (as it does if the
+hybrid name collides with an arm's name). `k:` sets the RRF constant (default
+60), which is a different `k:` than the neighbor count on `vec_scope`.
 
 ```ruby
 posts = Post.search("coffee", limit: 20)
-posts.first.search_score # fused RRF score (or the reranker's, if one ran), higher is better
+posts.first.search_score   # fused score, higher is better
 ```
 
-- `limit:` caps the number of results returned (default 20).
-- Each hybrid scope exposes a `<name>_score` reader (e.g. `search_score` for a scope named `:search`) on
-  every record in the result.
-- A blank/nil query returns an empty relation (`.none`) rather than matching everything or raising.
-- Pass `rerank: false` to skip the registered reranker (if any) and return the plain RRF order.
+Each arm produces a ranked candidate list, Reciprocal Rank Fusion combines them,
+an optional reranker reorders the result, and the top `limit` records come back
+as a relation ordered to match, each carrying a `<name>_score` reader. `limit:`
+defaults to 20. A blank query returns `.none`. Pass `rerank: false` to skip the
+reranker and return the plain fused order.
 
-Pipeline: the `fts5_scope` (BM25) and `vec_scope` (KNN) each contribute a ranked candidate list, RRF fuses
-them (using the `k:` from `hybrid_scope`), an optional reranker reorders the fused candidates, and the top
-`limit` records are loaded and returned as an eager `ActiveRecord::Relation` ordered to match.
+### Reranking
 
-### 3. Reranking
-
-Register a reranker once, and it applies to every hybrid scope automatically unless a call passes
-`rerank: false`:
+Register a reranker once and every hybrid scope uses it, unless a call opts out:
 
 ```ruby
 SqliteSearch.reranker do |query, documents, model:, scope:|
-  # documents is an Array of candidate ActiveRecord records (the fused RRF
-  # candidates, already loaded), in RRF order. Return them reordered — a
-  # subset is fine, and records outside the original candidate set are ignored.
+  # documents are the fused candidate records, already loaded, in RRF order.
+  # Return them reordered; a subset is fine, unknown records are ignored.
   MyRerankClient.rerank(query, documents)
 end
 ```
 
-- `model:` is the relation the scope was called on (e.g. what `Post.where(tenant_id: 5).search(...)` chains
-  from), not the bare model class — use `model.klass` for class-level introspection.
-- `scope:` is the hybrid scope's name, as a symbol (e.g. `:search`).
-- Reranking is **best-effort**: if the block raises, the error is logged (via `Rails.logger.warn` when
-  available) and the search degrades to the plain RRF order — a bad reranker never breaks a search request.
+`model:` is the relation the scope was called on, not the bare class, so use
+`model.klass` if you need the class. `scope:` is the hybrid scope name. Reranking
+is best-effort: if the block raises, the failure is logged and the search falls
+back to the fused order, so a broken reranker never takes down a search.
 
 ## Filtering and multi-tenancy
 
-Conditions chained onto the model *before* `.search`/`.semantic` are pushed into the query as an exact
-pre-filter, not applied after the fact:
+Conditions you chain before the search push into the query as an exact
+pre-filter, not a post-filter:
 
 ```ruby
-Post.where(tenant_id: 5).published.search("coffee")   # hybrid: pre-filters both the FTS5 and vec arms
-Post.where(tenant_id: 5).semantic("coffee")            # vector-only: pre-filters the KNN search
+Post.where(tenant_id: 5).published.search("coffee")   # pre-filters both arms
+Post.where(tenant_id: 5).semantic("coffee")           # pre-filters the KNN scan
 ```
 
-- The FTS5 arm filters via the ordinary `WHERE`/`JOIN` SQL AR already builds for the chained scope.
-- The vec arm filters via a `JOIN` back to the source table before the KNN scan runs. This pre-filter is
-  exact, not approximate — sqlite-vec's `vec0` KNN is a brute-force scan already, so joining in the
-  caller's conditions narrows what it scans without giving up completeness.
-- Concretely, `Post.where(tenant_id: 5).semantic("coffee", k: 10)` returns (up to) 10 nearest neighbors
-  *within tenant 5*, not the global top 10 filtered down to tenant 5 afterward.
+The keyword arm uses the ordinary `WHERE`/`JOIN` SQL that ActiveRecord already
+builds for the chained scope. The vector arm joins back to the source table
+before the scan runs. That pre-filter is exact rather than approximate, because
+`vec0`'s KNN is a brute-force scan to begin with, so folding in your conditions
+just narrows what it scans. Concretely,
+`Post.where(tenant_id: 5).semantic("coffee", k: 10)` returns the 10 nearest
+neighbors within tenant 5, not the global top 10 trimmed to tenant 5 afterward.
 
-Conditions chained *after* `.search`/`.semantic` are the escape hatch: they post-filter the already-fused
-(or already-retrieved) result set, same as any other AR relation:
+Chaining a condition after the search is the escape hatch. It post-filters the
+result set like any relation:
 
 ```ruby
-Post.search("coffee").where("created_at > ?", 1.week.ago) # post-filter: narrows the already-fused top-`limit`
+Post.search("coffee").where("created_at > ?", 1.week.ago)
 ```
 
-The pre-filter only works for conditions expressible as SQL against the source table (or tables reachable
-via `joins`) — `.where(...)`, `.joins(...)`, scopes built on those. Conditions that only exist Ruby-side
-(e.g. filtering on a value computed after loading) can't be pushed into either arm and must be applied as a
-post-filter instead, with the narrowing caveat above — raise `k:`/`limit:` to compensate if you need more
-results after filtering.
+Only conditions that have a SQL form against the source table (or tables reached
+through `joins`) can be pushed into the pre-filter. A condition that exists only
+in Ruby has nothing to push, so it lands as a post-filter, which narrows an
+already-fused set; raise `k:` or `limit:` if you need more rows to survive it.
 
-## Limitations
+## Limitations and notes
 
-1. **ActiveRecord 8.0+.** The migration helper and its `schema.rb` round-trip rely on `create_virtual_table`,
-   which was added in Rails 8.0. The gem does **not** work on 7.1 or 7.2 (verified). This is enforced by the
-   gemspec.
-2. **SQLite only.** This gem is built directly on SQLite's `FTS5` virtual table module; the SQLite library
-   your app links against must have FTS5 compiled in (true of the `sqlite3` gem's bundled SQLite, and of
-   most modern system SQLite builds).
-3. **Integer primary keys only.** Both FTS5 and `vec0` virtual tables key rows by `rowid`/an integer id
-   column, and SQLite `rowid` is always an integer. Models with a string/UUID primary key cannot be
-   indexed by `fts5_scope` or `vec_scope` — the sync callback raises `SqliteSearch::Error` with a clear
-   message if it ever sees a non-integer primary key, rather than letting the write fail with a cryptic
-   `SQLite3::MismatchException` deep in the driver.
-4. **Sync is via ActiveRecord `after_*_commit` callbacks, not database triggers.** Anything that changes
-   rows without running AR callbacks — `insert_all`, `update_all`, `delete_all`, raw SQL, another
-   process/connection writing to the table — will *not* update the FTS5 index. Run `Model.reindex` (or the
-   `sqlite_search:reindex` rake task) after any such bulk operation to bring the index back in sync.
-5. **Callback-sync failures leave the base row committed.** The sync callback runs in `after_save_commit`,
-   i.e. *after* the base record's transaction has already committed. If it raises (e.g. the integer-PK
-   guard above), that exception propagates out of `save!`/`create!`, so the call looks like it failed —
-   but the base record **is** already saved in the database; only the FTS5 write was skipped/rolled back.
-   Callers should not assume a raised exception from `create!`/`update!`/`save!` means nothing was
-   persisted, and should treat the index as potentially stale until the next `reindex`.
-6. **No database triggers are used.** The FTS5 table is created and modified only via
-   `create_virtual_table`/DML executed through Rails migrations and the sync callbacks above, which keeps
-   the whole setup representable in and restorable from `schema.rb` — there is nothing hidden in the
-   database that a fresh `db:schema:load` would fail to reproduce.
-7. **Missing FTS5 table raises a raw SQLite error.** If a scope is queried (or a record is saved) before
-   its migration has run, you'll get a plain `no such table: <table>_<scope>_fts` error rather than a
-   dedicated actionable one — run the migration (or the `sqlite_search:fts5` generator) to create it. A
-   friendlier error here is a planned improvement; it's non-trivial because ActiveRecord 8.1 hides virtual
-   tables from `table_exists?`.
-8. **Vector search needs the optional `neighbor` and `sqlite-vec` gems.** Neither is a dependency of
-   `sqlite_search` itself; add both to your Gemfile before declaring a `vec_scope`. Note that `sqlite-vec`
-   ships prebuilt native extensions and has no gem build for musl-based platforms (e.g. Alpine).
-9. **Cosine distance only, in this version.** `vec_scope`/`create_vec_index` only support
-   `distance: :cosine`; euclidean and inner-product distance are not exposed and are planned for a future
-   release.
-10. **Async by default — new rows are not immediately KNN-findable.** Embedding happens in a background
-    `SqliteSearch::EmbedJob` by default, so a record saved just now may not show up in `.semantic` results
-    until that job runs. Pass `sync: :inline` to `vec_scope` for synchronous embedding (also required if
-    your app doesn't use ActiveJob).
-11. **`.semantic` and `.search` are eager, unlike ordinary AR scopes.** Calling `.semantic` runs the embed
-    call and the KNN query immediately, rather than building a lazy relation. Calling `.search` (a
-    `hybrid_scope`) is eager too, and does more work per call — it re-runs *both* arm queries, RRF fusion,
-    and any registered reranker (which may itself be a network call) every time. Calling either twice
-    repeats all of that work twice; be careful chaining them inside code that might invoke the scope more
-    than once, and avoid calling `.search`/`.semantic` inside a loop.
-12. **Only SQL-expressible conditions can be pushed into a pre-filter; Ruby-side-only conditions can't.**
-    Chaining `.where`/`.joins` (and scopes built on them) before `.semantic`/`.search` pre-filters both the
-    FTS5 and vec arms exactly (see [Filtering and multi-tenancy](#filtering-and-multi-tenancy)) — but a
-    condition that only exists Ruby-side (e.g. filtering on a value computed after loading) has no SQL form
-    to push, so it can only be applied as a post-filter (`.where` chained *after* the scope), which narrows
-    an already-retrieved/already-fused set rather than the search itself. Native `vec0` partition keys
-    (sqlite-vec's built-in support for pre-partitioning a vector table by a key such as tenant) are a
-    possible future performance lever for very large tenant sets, once exposed by this gem.
-13. **The vec arm of a hybrid search has no relevance threshold.** Unlike a bare `.semantic` call, `hybrid_scope`
-    doesn't expose a `threshold:` — the vec arm always contributes its nearest neighbors to the RRF fusion,
-    even on a query with a poor semantic match, so hybrid results can include semantically-weak rows on
-    such queries. Per-arm thresholds are a possible future addition.
-14. **Each arm's candidate pool is capped before fusion.** A hybrid scope pulls `[limit * 3, 100].min`
-    candidates from each of the FTS5 and vec arms before running RRF, so a very large `limit:` still fuses
-    from at most 100 candidates per arm.
+**ActiveRecord 8.0 or newer.** The migration helpers and their `schema.rb`
+round-trip rely on `create_virtual_table`, which arrived in Rails 8.0. The gem
+does not run on 7.1 or 7.2, and the gemspec enforces that.
+
+**SQLite with FTS5.** The gem builds directly on SQLite's FTS5 module, so the
+SQLite library your app links against must have FTS5 compiled in. The `sqlite3`
+gem's bundled build has it, as do most modern system builds.
+
+**Integer primary keys only.** FTS5 and `vec0` both key rows by an integer id, so
+a model with a string or UUID primary key cannot be indexed. The sync callback
+raises a clear `SqliteSearch::Error` in that case rather than letting a cryptic
+`SQLite3::MismatchException` surface from deep in the driver.
+
+**Sync runs in `after_*_commit` callbacks, not triggers.** Any write that skips
+callbacks (`insert_all`, `update_all`, raw SQL, a second connection) leaves the
+index stale until you run `reindex` or `reembed`. That is the price of keeping
+everything in `schema.rb` with nothing hidden in the database.
+
+**A failed sync leaves the row committed.** The callback runs after the base
+row's transaction commits, so if it raises (for example the integer-PK guard),
+the exception comes out of `save!`, but the row is already saved and only the
+index write was skipped. Treat a raised exception there as "saved, index may be
+stale," not "nothing happened."
+
+**A missing index table raises a plain SQLite error.** Query a scope before its
+migration has run and you get `no such table: <table>_<scope>_fts`. Run the
+migration or the generator. A friendlier message is on the list; it is awkward
+today because ActiveRecord 8.1 hides virtual tables from `table_exists?`.
+
+**Vector search needs `neighbor` and `sqlite-vec`.** Add both to your Gemfile
+before declaring a `vec_scope`. `sqlite-vec` ships prebuilt native extensions and
+has no build for musl platforms such as Alpine.
+
+**Cosine distance only, for now.** `vec_scope` and `create_vec_index` support
+`distance: :cosine`. Euclidean and inner-product distance are planned.
+
+**Embedding is async by default.** A row saved right now may not appear in
+`.semantic` results until its `EmbedJob` runs. Use `sync: :inline` for immediate
+indexing (or if you do not use ActiveJob).
+
+**`.semantic` and `.search` are eager.** Unlike an ordinary scope, they run the
+embedding call and the queries the moment you call them rather than building a
+lazy relation. `.search` does the most work, re-running both arms, the fusion,
+and any reranker (possibly a network call) on every invocation, so do not call
+either one inside a loop.
+
+**Hybrid's vector arm has no relevance threshold.** A bare `.semantic` call takes
+`threshold:`, but `hybrid_scope` does not, so the vector arm always feeds its
+nearest neighbors into the fusion even for a weak semantic match. Per-arm
+thresholds may come later.
+
+**The candidate pool is capped.** A hybrid scope pulls `[limit * 3, 100].min`
+candidates from each arm before fusing, so a very large `limit:` still fuses from
+at most 100 per arm.
