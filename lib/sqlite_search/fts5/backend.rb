@@ -33,6 +33,13 @@ module SqliteSearch
       end
 
       def rebuild(model)
+        pk_type = model.columns_hash[model.primary_key.to_s]&.type
+        unless pk_type == :integer
+          raise SqliteSearch::Error,
+            "sqlite_search FTS5 indexing requires an integer primary key (used as the FTS rowid), " \
+            "but #{model.name}##{model.primary_key} is #{pk_type.inspect}. FTS5 does not support non-integer rowids."
+        end
+
         model.with_connection do |conn|
           conn.execute("DELETE FROM #{quoted(conn)}")
           col_list = @definition.columns.map { |c| conn.quote_column_name(c) }.join(", ")

@@ -14,6 +14,14 @@ module SqliteSearch
       class_option :index_name, type: :string, default: nil, desc: "FTS index name (default: <table>_search)"
 
       def create_migration_file
+        if options[:weights]
+          weights = options[:weights].split(",")
+          if weights.length != columns.length
+            raise Thor::Error,
+              "--weights expects one weight per column (#{columns.length} columns, got #{weights.length})"
+          end
+        end
+
         migration_template "create_fts5_table.rb.tt", "db/migrate/create_#{index_name}_fts5.rb"
       end
 

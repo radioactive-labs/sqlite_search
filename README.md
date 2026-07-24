@@ -130,3 +130,8 @@ whenever the index and the base table have drifted (see Limitations below).
    `create_virtual_table`/DML executed through Rails migrations and the sync callbacks above, which keeps
    the whole setup representable in and restorable from `schema.rb` — there is nothing hidden in the
    database that a fresh `db:schema:load` would fail to reproduce.
+6. **Missing FTS5 table raises a raw SQLite error.** If a scope is queried (or a record is saved) before
+   its migration has run, you'll get a plain `no such table: <table>_<scope>_fts` error rather than a
+   dedicated actionable one — run the migration (or the `sqlite_search:fts5` generator) to create it. A
+   friendlier error here is a planned improvement; it's non-trivial because ActiveRecord 8.1 hides virtual
+   tables from `table_exists?`.

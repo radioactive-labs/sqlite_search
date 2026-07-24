@@ -30,4 +30,22 @@ class ReindexTest < SqliteSearch::TestCase
     @klass.reindex
     assert_equal [1], @klass.by_body("coffee").pluck(:id)
   end
+
+  def test_reindex_raises_clear_error_for_non_integer_primary_key
+    conn = ActiveRecord::Base.connection
+    conn.create_table(:docs, id: false, force: true) { |t| t.string :uid, primary_key: true; t.text :body }
+    conn.create_virtual_table("docs_by_body_fts", :fts5, ["body", "tokenize = 'porter unicode61'"])
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "docs"
+      self.primary_key = "uid"
+      include SqliteSearch::Model
+      fts5_scope :by_body, against: :body
+    end
+    klass.insert_all([{ uid: "abc", body: "coffee" }])
+
+    assert_raises(SqliteSearch::Error) { klass.reindex }
+  ensure
+    conn = ActiveRecord::Base.connection
+    %w[docs_by_body_fts docs].each { |t| conn.execute("DROP TABLE IF EXISTS #{conn.quote_table_name(t)}") }
+  end
 end
