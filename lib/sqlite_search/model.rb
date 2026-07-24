@@ -112,6 +112,11 @@ module SqliteSearch
           SqliteSearch::Vec::Backend.new(definition).remove(self)
         end
       end
+
+      def reembed(name = nil)
+        definitions = name ? [sqlite_search_vec_definitions.fetch(name.to_sym)] : sqlite_search_vec_definitions.values
+        definitions.each { |definition| SqliteSearch::Vec::Backend.new(definition).reembed(self) }
+      end
     end
   end
 end

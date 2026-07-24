@@ -8,4 +8,12 @@ namespace :sqlite_search do
     klass.reindex(args[:scope])
     puts "Reindexed #{klass}#{args[:scope] ? " (#{args[:scope]})" : ""}."
   end
+
+  desc "Re-embed a vec index. Usage: rake sqlite_search:reembed[Post,semantic]"
+  task :reembed, [:model, :scope] => :environment do |_t, args|
+    raise ArgumentError, "model is required" unless args[:model]
+    klass = args[:model].constantize
+    klass.reembed(args[:scope])
+    puts "Re-embedded #{klass}#{args[:scope] ? " (#{args[:scope]})" : ""}."
+  end
 end
