@@ -26,6 +26,16 @@ module SqliteSearch
           pk = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"
           where("#{pk} IN (SELECT rowid FROM #{fts} WHERE #{fts} MATCH ?)", match)
         end
+
+        cols = definition.column_names
+        after_save_commit do
+          if (saved_changes.keys & cols).any?
+            SqliteSearch::Fts5::Backend.new(definition).sync(self)
+          end
+        end
+        after_destroy_commit do
+          SqliteSearch::Fts5::Backend.new(definition).remove(self)
+        end
       end
     end
   end
