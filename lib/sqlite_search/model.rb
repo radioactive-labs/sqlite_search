@@ -50,6 +50,11 @@ module SqliteSearch
           SqliteSearch::Fts5::Backend.new(definition).remove(self)
         end
       end
+
+      def reindex(name = nil)
+        definitions = name ? [sqlite_search_fts5_definitions.fetch(name.to_sym)] : sqlite_search_fts5_definitions.values
+        definitions.each { |definition| SqliteSearch::Fts5::Backend.new(definition).rebuild(self) }
+      end
     end
   end
 end
