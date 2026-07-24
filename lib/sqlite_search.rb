@@ -2,6 +2,7 @@
 
 require "active_record"
 require "sqlite_search/version"
+require "sqlite_search/query"
 
 module SqliteSearch
 end
