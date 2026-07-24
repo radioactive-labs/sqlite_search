@@ -12,5 +12,25 @@ module SqliteSearch
       b = ids_b.map { |id| {id: id} }
       Neighbor::Reranking.rrf(a, b, k: k).map { |row| [row[:result][:id], row[:score]] }
     end
+
+    # Best-effort rerank. `fused` is [[id, score], ...]; returns the same shape
+    # reordered by the reranker (RRF scores preserved), or the input unchanged
+    # on any reranker failure.
+    def rerank(query, fused, model:, scope_name:, reranker:)
+      return fused unless reranker
+      ids = fused.map(&:first)
+      by_id = model.where(model.primary_key => ids).index_by { |r| r.public_send(model.primary_key) }
+      records = ids.filter_map { |id| by_id[id] }
+      scores = fused.to_h
+      begin
+        reordered = reranker.call(query, records, model: model, scope: scope_name)
+        reordered.map { |rec| [rec.public_send(model.primary_key), scores[rec.public_send(model.primary_key)]] }
+      rescue => e
+        if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
+          Rails.logger.warn { "sqlite_search: rerank failed, using fused order (#{e.class}: #{e.message})" }
+        end
+        fused
+      end
+    end
   end
 end

@@ -153,6 +153,8 @@ module SqliteSearch
           fused = SqliteSearch::Hybrid.rrf(fts_ids, vec_ids, k: rrf_k)
           next none if fused.empty?
 
+          reranker = rerank ? SqliteSearch.config.reranker : nil
+          fused = SqliteSearch::Hybrid.rerank(query, fused, model: self, scope_name: name.to_sym, reranker: reranker)
           fused = fused.first(limit)
           ids = fused.map(&:first)
           scores = fused.to_h
