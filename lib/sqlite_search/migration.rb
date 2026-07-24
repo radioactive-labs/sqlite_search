@@ -7,7 +7,7 @@ module SqliteSearch
   # table is representable in schema.rb (unlike triggers), and optionally seeds
   # it from the source table.
   module Migration
-    def create_fts5_table(table, name, against:, tokenizer: "porter unicode61", primary_key: "id", backfill: false)
+    def create_fts5_index(table, name, against:, tokenizer: "porter unicode61", primary_key: "id", backfill: false)
       columns = SqliteSearch::Fts5.columns_for(against)
       fts_table = "#{table}_#{name}_fts"
 
@@ -15,12 +15,12 @@ module SqliteSearch
       options << "tokenize = '#{tokenizer}'"
       connection.create_virtual_table(fts_table, :fts5, options)
 
-      backfill_fts5_table(table, fts_table, columns, primary_key) if backfill
+      backfill_fts5_index(table, fts_table, columns, primary_key) if backfill
     end
 
     private
 
-    def backfill_fts5_table(table, fts_table, columns, primary_key)
+    def backfill_fts5_index(table, fts_table, columns, primary_key)
       col_list = columns.map { |c| connection.quote_column_name(c) }.join(", ")
       non_blank = columns.map { |c| "COALESCE(#{connection.quote_column_name(c)}, '')" }.join(" || ")
       connection.execute(<<~SQL.squish)

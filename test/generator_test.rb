@@ -14,7 +14,7 @@ class GeneratorTest < SqliteSearch::TestCase
       refute_nil file, "migration file should be generated"
       content = File.read(file)
       # default index name is "search" -> table posts_search_fts (not posts_post_search_fts)
-      assert_match(/create_fts5_table :posts, :search, against: \{ title: 2, body: 1 \}/, content)
+      assert_match(/create_fts5_index :posts, :search, against: \{ title: 2, body: 1 \}/, content)
     end
   end
 
@@ -26,7 +26,7 @@ class GeneratorTest < SqliteSearch::TestCase
       file = Dir[File.join(dir, "db/migrate/*_create_by_body_fts5.rb")].first
       refute_nil file, "migration file should be generated with the custom index name"
       content = File.read(file)
-      assert_match(/create_fts5_table :posts, :by_body, against: :body/, content)
+      assert_match(/create_fts5_index :posts, :by_body, against: :body/, content)
     end
   end
 

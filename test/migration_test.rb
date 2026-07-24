@@ -23,20 +23,20 @@ class MigrationTest < SqliteSearch::TestCase
   end
 
   def test_creates_single_column_fts_table
-    Runner.new.create_fts5_table(:posts, :by_body, against: :body)
+    Runner.new.create_fts5_index(:posts, :by_body, against: :body)
     # AR 8.1's #tables excludes virtual tables; assert existence by querying it.
     assert_equal 0, @conn.select_value("SELECT count(*) FROM posts_by_body_fts").to_i
   end
 
   def test_backfills_existing_rows
     @conn.execute("INSERT INTO posts (id, body) VALUES (1, 'morning coffee')")
-    Runner.new.create_fts5_table(:posts, :by_body, against: :body, backfill: true)
+    Runner.new.create_fts5_index(:posts, :by_body, against: :body, backfill: true)
     count = @conn.select_value("SELECT count(*) FROM posts_by_body_fts WHERE posts_by_body_fts MATCH 'coffee'")
     assert_equal 1, count
   end
 
   def test_schema_dump_round_trips
-    Runner.new.create_fts5_table(:posts, :full, against: { title: 2, body: 1 })
+    Runner.new.create_fts5_index(:posts, :full, against: { title: 2, body: 1 })
     io = StringIO.new
     ActiveRecord::SchemaDumper.dump(@conn.pool, io)
     dump = io.string

@@ -23,7 +23,7 @@ module SqliteSearch
           end
         end
 
-        migration_template "create_fts5_table.rb.tt", "db/migrate/create_#{index_name}_fts5.rb"
+        migration_template "create_fts5_index.rb.tt", "db/migrate/create_#{index_name}_fts5.rb"
       end
 
       private

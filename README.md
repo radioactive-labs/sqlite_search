@@ -16,13 +16,13 @@ gem "sqlite_search"
 
 ### 1. Create the FTS5 index in a migration
 
-Use the `create_fts5_table` migration helper (mixed into `ActiveRecord::Migration` automatically in a Rails
+Use the `create_fts5_index` migration helper (mixed into `ActiveRecord::Migration` automatically in a Rails
 app):
 
 ```ruby
 class CreateSearchFts5 < ActiveRecord::Migration[8.0]
   def change
-    create_fts5_table :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
+    create_fts5_index :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
   end
 end
 ```
@@ -41,7 +41,7 @@ You can generate this migration instead of writing it by hand:
 rails g sqlite_search:fts5 Post title body --weights 2,1
 ```
 
-This generates `db/migrate/..._create_search_fts5.rb` calling `create_fts5_table :posts, :search,
+This generates `db/migrate/..._create_search_fts5.rb` calling `create_fts5_index :posts, :search,
 against: { title: 2, body: 1 }, backfill: true` (FTS table `posts_search_fts`). Omit `--weights` to index
 columns unweighted (a single column becomes `against: :column`, multiple columns become `against: [:a, :b]`).
 
@@ -51,7 +51,7 @@ choose another (e.g. when a model needs more than one FTS index):
 
 ```
 rails g sqlite_search:fts5 Post body --index by_body
-# => create_fts5_table :posts, :by_body, against: :body   (FTS table posts_by_body_fts)
+# => create_fts5_index :posts, :by_body, against: :body   (FTS table posts_by_body_fts)
 ```
 
 ### 2. Declare the scope on the model
