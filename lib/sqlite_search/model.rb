@@ -42,12 +42,16 @@ module SqliteSearch
         end
 
         cols = definition.column_names
-        after_save_commit do
+        # FTS5 sync runs inside the transaction (after_save/after_destroy), not
+        # after_commit: an FTS5 write is a cheap local write, so keeping it in the
+        # transaction makes the index atomic with the row. A failed write rolls
+        # both back rather than leaving a committed row with a stale index.
+        after_save do
           if (saved_changes.keys & cols).any?
             SqliteSearch::Fts5::Backend.new(definition).sync(self)
           end
         end
-        after_destroy_commit do
+        after_destroy do
           SqliteSearch::Fts5::Backend.new(definition).remove(self)
         end
       end

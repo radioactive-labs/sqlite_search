@@ -96,10 +96,11 @@ class Post < ApplicationRecord
 end
 ```
 
-`fts5_scope` defines the `Post.search` scope and wires up `after_save_commit` and
-`after_destroy_commit` callbacks that keep the index in step whenever an indexed
-column changes. A model can declare more than one index (`fts5_scope :search_body,
-against: :body`) and each gets its own scope.
+`fts5_scope` defines the `Post.search` scope and wires up `after_save` and
+`after_destroy` callbacks that keep the index in step whenever an indexed column
+changes. They run inside the transaction, so the index write is atomic with the
+row: if it fails, both roll back. A model can declare more than one index
+(`fts5_scope :search_body, against: :body`) and each gets its own scope.
 
 ### Query
 
@@ -211,8 +212,11 @@ blank or nil query returns `.none`.
 Re-embed after a bulk write the same way you reindex FTS5:
 
 ```ruby
-Post.reembed(:semantic_search)   # or rake sqlite_search:reembed[Post,semantic_search]
+Post.reembed(:semantic_search)   # one named vec index
+Post.reembed                     # every vec_scope on the model
 ```
+
+or `rake sqlite_search:reembed[Post,semantic_search]` from the command line.
 
 ## Hybrid search
 
@@ -309,16 +313,19 @@ a model with a string or UUID primary key cannot be indexed. The sync callback
 raises a clear `SqliteSearch::Error` in that case rather than letting a cryptic
 `SQLite3::MismatchException` surface from deep in the driver.
 
-**Sync runs in `after_*_commit` callbacks, not triggers.** Any write that skips
+**Sync runs in ActiveRecord callbacks, not triggers.** Any write that skips
 callbacks (`insert_all`, `update_all`, raw SQL, a second connection) leaves the
 index stale until you run `reindex` or `reembed`. That is the price of keeping
 everything in `schema.rb` with nothing hidden in the database.
 
-**A failed sync leaves the row committed.** The callback runs after the base
-row's transaction commits, so if it raises (for example the integer-PK guard),
-the exception comes out of `save!`, but the row is already saved and only the
-index write was skipped. Treat a raised exception there as "saved, index may be
-stale," not "nothing happened."
+**A failed vector sync leaves the row committed; FTS5 does not.** The FTS5 index
+syncs inside the transaction, so a failed FTS5 write (for example the integer-PK
+guard) rolls the row back with it: index and row stay atomic. The vector index
+syncs after commit, because it enqueues a job by default and embedding is an
+out-of-band call you do not want holding a transaction open. So if a vector sync
+raises, the row is already saved and only the vector write was skipped. Treat a
+raised exception from the vector path as "saved, vectors may be stale," and
+recover with `reembed`.
 
 **A missing index table raises a plain SQLite error.** Query a scope before its
 migration has run and you get `no such table: <table>_<scope>_fts`. Run the

@@ -92,8 +92,24 @@ class SyncTest < SqliteSearch::TestCase
     end
     error = assert_raises(SqliteSearch::Error) { klass.create!(uid: "abc", body: "coffee") }
     assert_match(/integer primary key/, error.message)
+    assert_equal 0, klass.count # the guard raised in-transaction, so the row rolled back
   ensure
     conn = ActiveRecord::Base.connection
     %w[docs_by_body_fts docs].each { |t| conn.execute("DROP TABLE IF EXISTS #{conn.quote_table_name(t)}") }
+  end
+
+  def test_fts_sync_is_atomic_with_the_row
+    # No FTS table exists for this scope, so the in-transaction sync write fails.
+    @conn.create_table(:notes, force: true) { |t| t.text :body }
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "notes"
+      include SqliteSearch::Model
+
+      fts5_scope :body_search, against: :body
+    end
+    assert_raises(ActiveRecord::StatementInvalid) { klass.create!(body: "coffee") }
+    assert_equal 0, klass.count # row rolled back with the failed index write
+  ensure
+    @conn.execute("DROP TABLE IF EXISTS notes")
   end
 end
