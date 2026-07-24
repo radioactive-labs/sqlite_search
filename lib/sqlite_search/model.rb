@@ -123,6 +123,50 @@ module SqliteSearch
         definitions = name ? [sqlite_search_vec_definitions.fetch(name.to_sym)] : sqlite_search_vec_definitions.values
         definitions.each { |definition| SqliteSearch::Vec::Backend.new(definition).reembed(self) }
       end
+
+      def sqlite_search_hybrid_definitions
+        own = (@sqlite_search_hybrid_definitions ||= {})
+        return own unless superclass.respond_to?(:sqlite_search_hybrid_definitions)
+        superclass.sqlite_search_hybrid_definitions.merge(own)
+      end
+
+      def hybrid_scope(name, fts5:, vec:, k: 60)
+        fts5_name = fts5.to_sym
+        vec_name = vec.to_sym
+        unless sqlite_search_fts5_definitions.key?(fts5_name)
+          raise SqliteSearch::Error, "hybrid_scope :#{name} references fts5: :#{fts5_name}, but no such fts5_scope is declared on #{self.name}."
+        end
+        unless sqlite_search_vec_definitions.key?(vec_name)
+          raise SqliteSearch::Error, "hybrid_scope :#{name} references vec: :#{vec_name}, but no such vec_scope is declared on #{self.name}."
+        end
+        (@sqlite_search_hybrid_definitions ||= {})[name.to_sym] = {fts5: fts5_name, vec: vec_name, k: k}
+        rrf_k = k
+        score_method = "#{name}_score"
+
+        scope name, ->(query = nil, limit: 20, rerank: true) do
+          next none if query.nil? || query.to_s.strip.empty?
+          pool = [limit * 3, 100].min
+
+          fts_ids = all.public_send(fts5_name, query).order_by_rank.limit(pool).pluck(primary_key)
+          vec_ids = all.public_send(vec_name, query, k: pool).pluck(primary_key)
+
+          fused = SqliteSearch::Hybrid.rrf(fts_ids, vec_ids, k: rrf_k)
+          next none if fused.empty?
+
+          fused = fused.first(limit)
+          ids = fused.map(&:first)
+          scores = fused.to_h
+          pkc = connection.quote_column_name(primary_key)
+          order = Arel.sql("CASE #{quoted_table_name}.#{pkc} " +
+            ids.each_with_index.map { |id, i| "WHEN #{connection.quote(id)} THEN #{i}" }.join(" ") + " END")
+          decorate = Module.new do
+            define_method(:records) do
+              super().each { |rec| rec.define_singleton_method(score_method) { scores[rec.id] } }
+            end
+          end
+          where(primary_key => ids).order(order).extending(decorate)
+        end
+      end
     end
   end
 end
