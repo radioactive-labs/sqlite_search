@@ -5,8 +5,8 @@ tables. Declare which columns to index, optionally weight them, and get a query 
 BM25-based relevance ranking, and a reindex path — with no triggers and a schema that round-trips cleanly
 through `schema.rb`. Vector (semantic) search is also available, built on
 [sqlite-vec](https://github.com/asg017/sqlite-vec) through the [`neighbor`](https://github.com/ankane/neighbor)
-gem, with your app supplying embeddings via a callback. Hybrid (FTS5 + vector) search is still on the
-roadmap.
+gem, with your app supplying embeddings via a callback. Hybrid (FTS5 + vector) search fuses an `fts5_scope`
+and a `vec_scope` via Reciprocal Rank Fusion, with an optional reranking hook.
 
 ## Install
 
@@ -219,6 +219,97 @@ rake sqlite_search:reembed[Post,semantic]
 Run this after `create_vec_index` to embed existing rows (the migration itself does not backfill), or
 whenever the vec table and the base table have drifted (e.g. after a bulk update that skipped callbacks).
 
+## Hybrid search
+
+Hybrid search fuses an `fts5_scope` and a `vec_scope` you've already declared on a model into one query,
+combining BM25 keyword rank and cosine-similarity KNN rank via Reciprocal Rank Fusion (RRF), with an
+optional reranking pass on top.
+
+### 1. Declare the scope
+
+`hybrid_scope` references an existing `fts5_scope` and `vec_scope` by name — declare those first:
+
+```ruby
+class Post < ApplicationRecord
+  include SqliteSearch::Model
+
+  fts5_scope :by_body, against: :body
+  vec_scope :semantic, against: :body, dimensions: 768, sync: :inline
+  hybrid_scope :search, fts5: :by_body, vec: :semantic
+end
+```
+
+- `fts5:` / `vec:` name the `fts5_scope`/`vec_scope` to fuse. They must already be declared on the model —
+  `hybrid_scope` raises `SqliteSearch::Error` at declaration time otherwise.
+- `k:` is the RRF constant (default 60); higher values flatten the influence of rank position.
+
+### 2. Query
+
+```ruby
+posts = Post.search("coffee", limit: 20)
+posts.first.search_score # fused RRF score (or the reranker's, if one ran), higher is better
+```
+
+- `limit:` caps the number of results returned (default 20).
+- Each hybrid scope exposes a `<name>_score` reader (e.g. `search_score` for a scope named `:search`) on
+  every record in the result.
+- A blank/nil query returns an empty relation (`.none`) rather than matching everything or raising.
+- Pass `rerank: false` to skip the registered reranker (if any) and return the plain RRF order.
+
+Pipeline: the `fts5_scope` (BM25) and `vec_scope` (KNN) each contribute a ranked candidate list, RRF fuses
+them (using the `k:` from `hybrid_scope`), an optional reranker reorders the fused candidates, and the top
+`limit` records are loaded and returned as an eager `ActiveRecord::Relation` ordered to match.
+
+### 3. Reranking
+
+Register a reranker once, and it applies to every hybrid scope automatically unless a call passes
+`rerank: false`:
+
+```ruby
+SqliteSearch.reranker do |query, documents, model:, scope:|
+  # documents is an Array of candidate ActiveRecord records (the fused RRF
+  # candidates, already loaded), in RRF order. Return them reordered — a
+  # subset is fine, and records outside the original candidate set are ignored.
+  MyRerankClient.rerank(query, documents)
+end
+```
+
+- `model:` is the relation the scope was called on (e.g. what `Post.where(tenant_id: 5).search(...)` chains
+  from), not the bare model class — use `model.klass` for class-level introspection.
+- `scope:` is the hybrid scope's name, as a symbol (e.g. `:search`).
+- Reranking is **best-effort**: if the block raises, the error is logged (via `Rails.logger.warn` when
+  available) and the search degrades to the plain RRF order — a bad reranker never breaks a search request.
+
+## Filtering and multi-tenancy
+
+Conditions chained onto the model *before* `.search`/`.semantic` are pushed into the query as an exact
+pre-filter, not applied after the fact:
+
+```ruby
+Post.where(tenant_id: 5).published.search("coffee")   # hybrid: pre-filters both the FTS5 and vec arms
+Post.where(tenant_id: 5).semantic("coffee")            # vector-only: pre-filters the KNN search
+```
+
+- The FTS5 arm filters via the ordinary `WHERE`/`JOIN` SQL AR already builds for the chained scope.
+- The vec arm filters via a `JOIN` back to the source table before the KNN scan runs. This pre-filter is
+  exact, not approximate — sqlite-vec's `vec0` KNN is a brute-force scan already, so joining in the
+  caller's conditions narrows what it scans without giving up completeness.
+- Concretely, `Post.where(tenant_id: 5).semantic("coffee", k: 10)` returns (up to) 10 nearest neighbors
+  *within tenant 5*, not the global top 10 filtered down to tenant 5 afterward.
+
+Conditions chained *after* `.search`/`.semantic` are the escape hatch: they post-filter the already-fused
+(or already-retrieved) result set, same as any other AR relation:
+
+```ruby
+Post.search("coffee").where("created_at > ?", 1.week.ago) # post-filter: narrows the already-fused top-`limit`
+```
+
+The pre-filter only works for conditions expressible as SQL against the source table (or tables reachable
+via `joins`) — `.where(...)`, `.joins(...)`, scopes built on those. Conditions that only exist Ruby-side
+(e.g. filtering on a value computed after loading) can't be pushed into either arm and must be applied as a
+post-filter instead, with the narrowing caveat above — raise `k:`/`limit:` to compensate if you need more
+results after filtering.
+
 ## Limitations
 
 1. **ActiveRecord 8.0+.** The migration helper and its `schema.rb` round-trip rely on `create_virtual_table`,
@@ -263,9 +354,20 @@ whenever the vec table and the base table have drifted (e.g. after a bulk update
 11. **`.semantic` is eager, unlike ordinary AR scopes.** Calling it runs the embed call and the KNN query
     immediately, rather than building a lazy relation — so calling it twice embeds (and queries) twice. Be
     careful chaining it inside code that might invoke the scope more than once.
-12. **Filtering after `.semantic` narrows the already-retrieved top-k; it does not constrain the ANN
-    search.** `Post.semantic("query").where(published: true)` first fetches the `k` nearest neighbors, then
-    filters that result set — it will not necessarily return `k` published posts. Raise `k` to compensate
-    if you need more results after filtering.
-13. **Integer primary keys only.** Same restriction as FTS5 above (see limitation 3) — vec tables use
+12. **Only SQL-expressible conditions can be pushed into a pre-filter; Ruby-side-only conditions can't.**
+    Chaining `.where`/`.joins` (and scopes built on them) before `.semantic`/`.search` pre-filters both the
+    FTS5 and vec arms exactly (see [Filtering and multi-tenancy](#filtering-and-multi-tenancy)) — but a
+    condition that only exists Ruby-side (e.g. filtering on a value computed after loading) has no SQL form
+    to push, so it can only be applied as a post-filter (`.where` chained *after* the scope), which narrows
+    an already-retrieved/already-fused set rather than the search itself. Native `vec0` partition keys
+    (sqlite-vec's built-in support for pre-partitioning a vector table by a key such as tenant) are a
+    possible future performance lever for very large tenant sets, once exposed by this gem.
+13. **The vec arm of a hybrid search has no relevance threshold.** Unlike a bare `.semantic` call, `hybrid_scope`
+    doesn't expose a `threshold:` — the vec arm always contributes its nearest neighbors to the RRF fusion,
+    even on a query with a poor semantic match, so hybrid results can include semantically-weak rows on
+    such queries. Per-arm thresholds are a possible future addition.
+14. **Each arm's candidate pool is capped before fusion.** A hybrid scope pulls `[limit * 3, 100].min`
+    candidates from each of the FTS5 and vec arms before running RRF, so a very large `limit:` still fuses
+    from at most 100 candidates per arm.
+15. **Integer primary keys only.** Same restriction as FTS5 above (see limitation 3) — vec tables use
     `rowid`/an integer primary key column.

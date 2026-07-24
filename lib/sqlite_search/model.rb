@@ -145,6 +145,7 @@ module SqliteSearch
 
         scope name, ->(query = nil, limit: 20, rerank: true) do
           next none if query.nil? || query.to_s.strip.empty?
+          # candidate pool per arm before fusion; capped so a large limit: can't over-fetch
           pool = [limit * 3, 100].min
 
           fts_ids = all.public_send(fts5_name, query).order_by_rank.limit(pool).pluck(primary_key)
