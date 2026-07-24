@@ -1,5 +1,7 @@
 # sqlite_search
 
+[![Gem Version](https://img.shields.io/gem/v/sqlite_search)](https://rubygems.org/gems/sqlite_search)
+[![CI](https://github.com/radioactive-labs/sqlite_search/actions/workflows/ci.yml/badge.svg)](https://github.com/radioactive-labs/sqlite_search/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
 **Search that lives in the SQLite file you already ship, not a separate service
