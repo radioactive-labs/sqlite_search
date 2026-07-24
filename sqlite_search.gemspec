@@ -14,9 +14,12 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*", "README.md"]
   spec.require_paths = ["lib"]
 
-  spec.add_dependency "activerecord", ">= 7.1"
+  # ActiveRecord 8.0 is the floor: create_virtual_table (used by the FTS5
+  # migration helper and its schema.rb round-trip) was added in Rails 8.0.
+  # Verified: fails on 7.1/7.2 (no create_virtual_table), passes on 8.0/8.1.
+  spec.add_dependency "activerecord", ">= 8.0"
   spec.add_development_dependency "sqlite3", ">= 2.1"
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
-  spec.add_development_dependency "railties", ">= 7.1"
+  spec.add_development_dependency "railties", ">= 8.0"
 end
