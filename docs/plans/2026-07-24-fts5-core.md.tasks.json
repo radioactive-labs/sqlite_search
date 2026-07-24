@@ -4,55 +4,55 @@
     {
       "id": 0,
       "subject": "Task 0: Gem scaffold + test harness",
-      "status": "pending",
+      "status": "completed",
       "description": "Loadable gem with in-memory ActiveRecord + Minitest harness and one passing test.\n\n```json:metadata\n{\"files\": [\"sqlite_search.gemspec\",\"Gemfile\",\"Rakefile\",\"lib/sqlite_search/version.rb\",\"lib/sqlite_search.rb\",\"test/test_helper.rb\",\"test/version_test.rb\"], \"verifyCommand\": \"bundle exec rake test\", \"acceptanceCriteria\": [\"rake test passes\",\"VERSION defined\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 1,
       "subject": "Task 1: Query sanitizer (SqliteSearch::Query)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [0],
       "description": "Turn arbitrary user text into a safe FTS5 MATCH (or nil).\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/query.rb\",\"test/query_test.rb\",\"lib/sqlite_search.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest test/query_test.rb\", \"acceptanceCriteria\": [\"AND-join\",\"phrases preserved\",\"operators stripped\",\"prefix star\",\"blank->nil\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 2,
       "subject": "Task 2: create_fts5_table helper + schema round-trip",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [0],
       "description": "Migration helper creating per-scope FTS5 virtual table (optional backfill) that round-trips schema.rb.\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/fts5.rb\",\"lib/sqlite_search/migration.rb\",\"test/migration_test.rb\",\"lib/sqlite_search.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest test/migration_test.rb\", \"acceptanceCriteria\": [\"table created\",\"backfill\",\"schema round-trip\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 3,
       "subject": "Task 3: fts5_scope DSL + filter relation",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [1, 2],
       "description": "fts5_scope registers a composable AR::Relation scope filtering by MATCH.\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/fts5/definition.rb\",\"lib/sqlite_search/model.rb\",\"test/model_scope_test.rb\",\"lib/sqlite_search.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest test/model_scope_test.rb\", \"acceptanceCriteria\": [\"scope filters\",\"stemming\",\"blank none\",\"composes\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 4,
       "subject": "Task 4: Callback sync (Fts5::Backend)",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3],
       "description": "Keep index in sync via after_save_commit/after_destroy_commit, guarded by changed columns.\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/fts5/backend.rb\",\"test/sync_test.rb\",\"lib/sqlite_search/model.rb\",\"lib/sqlite_search.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest test/sync_test.rb\", \"acceptanceCriteria\": [\"create index\",\"update reindex\",\"destroy remove\",\"ignore non-indexed\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 5,
       "subject": "Task 5: order_by_rank + BM25 weights",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [3],
       "description": "Opt-in relevance ordering honoring per-column weights, exposing <name>_rank (higher=better).\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/fts5/definition.rb\",\"lib/sqlite_search/model.rb\",\"test/rank_test.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest test/rank_test.rb\", \"acceptanceCriteria\": [\"relevance order\",\"weights\",\"rank reader\",\"blank safe\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 6,
       "subject": "Task 6: reindex + rake task",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [4],
       "description": "Rebuild an index after bulk/raw writes that bypass callbacks.\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/model.rb\",\"lib/tasks/sqlite_search.rake\",\"test/reindex_test.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest test/reindex_test.rb\", \"acceptanceCriteria\": [\"reindex one\",\"reindex all\",\"recover bulk insert\"], \"requiresUserVerification\": false}\n```"
     },
     {
       "id": 7,
       "subject": "Task 7: Railtie wiring + fts5 generator",
-      "status": "pending",
+      "status": "completed",
       "blockedBy": [6],
       "description": "Auto-include concern/migration helper into ActiveRecord, load rake, scaffold FTS5 migrations.\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/railtie.rb\",\"lib/generators/sqlite_search/fts5_generator.rb\",\"lib/generators/sqlite_search/templates/create_fts5_table.rb.tt\",\"test/generator_test.rb\"], \"verifyCommand\": \"bundle exec rake test\", \"acceptanceCriteria\": [\"railtie wiring\",\"rake registered\",\"generator renders\",\"suite green\"], \"requiresUserVerification\": false}\n```"
     }
