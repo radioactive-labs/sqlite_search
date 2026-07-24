@@ -18,6 +18,14 @@ module SqliteSearch
       backfill_fts5_index(table, fts_table, columns, primary_key) if backfill
     end
 
+    def create_vec_index(table, name, dimensions:, distance: :cosine, primary_key: "id")
+      vec_table = "#{table}_#{name}_vec"
+      connection.create_virtual_table(vec_table, :vec0, [
+        "#{primary_key} integer primary key",
+        "embedding float[#{dimensions}] distance_metric=#{distance}"
+      ])
+    end
+
     private
 
     def backfill_fts5_index(table, fts_table, columns, primary_key)
