@@ -94,6 +94,22 @@ module SqliteSearch
           end
           where(primary_key => ids).order(order).extending(decorate)
         end
+
+        vec_cols = definition.column_names
+        vec_sync = sync
+        after_save_commit do
+          if (saved_changes.keys & vec_cols).any?
+            backend = SqliteSearch::Vec::Backend.new(definition)
+            if vec_sync == :inline
+              backend.embed_and_store(self)
+            else
+              SqliteSearch::EmbedJob.perform_later(self.class.name, public_send(self.class.primary_key), definition.name.to_s)
+            end
+          end
+        end
+        after_destroy_commit do
+          SqliteSearch::Vec::Backend.new(definition).remove(self)
+        end
       end
     end
   end
