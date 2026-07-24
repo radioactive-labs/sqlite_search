@@ -155,6 +155,7 @@ module SqliteSearch
 
           reranker = rerank ? SqliteSearch.config.reranker : nil
           fused = SqliteSearch::Hybrid.rerank(query, fused, model: self, scope_name: name.to_sym, reranker: reranker)
+          next none if fused.empty?
           fused = fused.first(limit)
           ids = fused.map(&:first)
           scores = fused.to_h

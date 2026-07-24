@@ -24,7 +24,10 @@ module SqliteSearch
       scores = fused.to_h
       begin
         reordered = reranker.call(query, records, model: model, scope: scope_name)
-        reordered.map { |rec| [rec.public_send(model.primary_key), scores[rec.public_send(model.primary_key)]] }
+        reordered.filter_map do |rec|
+          id = rec.public_send(model.primary_key)
+          [id, scores[id]] if scores.key?(id)
+        end
       rescue => e
         if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
           Rails.logger.warn { "sqlite_search: rerank failed, using fused order (#{e.class}: #{e.message})" }
