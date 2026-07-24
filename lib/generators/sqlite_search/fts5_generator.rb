@@ -7,6 +7,7 @@ module SqliteSearch
   module Generators
     class Fts5Generator < Rails::Generators::NamedBase
       include ActiveRecord::Generators::Migration
+
       source_root File.expand_path("templates", __dir__)
 
       argument :columns, type: :array, default: [], banner: "column column"

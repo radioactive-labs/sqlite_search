@@ -1,14 +1,19 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class VecPrefilterTest < SqliteSearch::TestCase
   def setup
     @conn = ActiveRecord::Base.connection
-    @conn.create_table(:posts, force: true) { |t| t.integer :tenant_id; t.text :body }
+    @conn.create_table(:posts, force: true) { |t|
+      t.integer :tenant_id
+      t.text :body
+    }
     @conn.create_virtual_table("posts_semantic_vec", "vec0", ["id integer primary key", "embedding float[3] distance_metric=cosine"])
     @klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
     end
     # id 3 is closest to a "coffee" query but in tenant 2. Its body is an exact

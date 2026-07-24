@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class HybridRerankTest < SqliteSearch::TestCase
@@ -10,6 +11,7 @@ class HybridRerankTest < SqliteSearch::TestCase
     @klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       fts5_scope :by_body, against: :body
       vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
       hybrid_scope :search, fts5: :by_body, vec: :semantic

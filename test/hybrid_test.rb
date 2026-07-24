@@ -1,15 +1,20 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class HybridTest < SqliteSearch::TestCase
   def setup
     @conn = ActiveRecord::Base.connection
-    @conn.create_table(:posts, force: true) { |t| t.integer :tenant_id; t.text :body }
+    @conn.create_table(:posts, force: true) { |t|
+      t.integer :tenant_id
+      t.text :body
+    }
     @conn.create_virtual_table("posts_by_body_fts", "fts5", ["body", "tokenize = 'porter unicode61'"])
     @conn.create_virtual_table("posts_semantic_vec", "vec0", ["id integer primary key", "embedding float[3] distance_metric=cosine"])
     @klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       fts5_scope :by_body, against: :body
       vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
       hybrid_scope :search, fts5: :by_body, vec: :semantic
@@ -51,6 +56,7 @@ class HybridTest < SqliteSearch::TestCase
       Class.new(ActiveRecord::Base) do
         self.table_name = "posts"
         include SqliteSearch::Model
+
         vec_scope :semantic, against: :body, dimensions: 3
         hybrid_scope :bad, fts5: :nope, vec: :semantic
       end
@@ -62,6 +68,7 @@ class HybridTest < SqliteSearch::TestCase
       Class.new(ActiveRecord::Base) do
         self.table_name = "posts"
         include SqliteSearch::Model
+
         fts5_scope :search, against: :body
         vec_scope :semantic, against: :body, dimensions: 3
         hybrid_scope :search, fts5: :search, vec: :semantic

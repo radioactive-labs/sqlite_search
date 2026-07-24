@@ -24,7 +24,7 @@ module SqliteSearch
           next none.extending(SqliteSearch::Fts5::NullRank) if match.nil? || match.to_s.empty?
 
           fts = connection.quote_table_name(definition.table_name)
-          pk  = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"
+          pk = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"
 
           # bm25() is only valid in a query that MATCHes the fts table, so
           # order_by_rank joins the fts table and re-applies MATCH here.

@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class QueryTest < SqliteSearch::TestCase
@@ -31,7 +32,7 @@ class QueryTest < SqliteSearch::TestCase
   end
 
   def test_invalid_encoding_does_not_raise
-    input = "coffee \xFF\xFE shop".dup.force_encoding("UTF-8")
+    input = (+"coffee \xFF\xFE shop").force_encoding("UTF-8")
     assert_equal "coffee AND shop", B.build(input)
   end
 

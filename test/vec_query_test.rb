@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class VecQueryTest < SqliteSearch::TestCase
@@ -9,6 +10,7 @@ class VecQueryTest < SqliteSearch::TestCase
     @klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 3
     end
     @klass.create!(id: 1, body: "morning coffee")
@@ -16,7 +18,7 @@ class VecQueryTest < SqliteSearch::TestCase
     # index by hand via the internal neighbor model + stub embedder
     embed = SqliteSearch.config.embedder
     vecs = @klass.sqlite_search_vec_definitions[:semantic].neighbor_model
-    { 1 => "morning coffee", 2 => "green tea" }.each do |id, txt|
+    {1 => "morning coffee", 2 => "green tea"}.each do |id, txt|
       vecs.create!(id: id, embedding: embed.call(txt, model: @klass, scope: :semantic))
     end
   end
@@ -60,6 +62,7 @@ class VecQueryTest < SqliteSearch::TestCase
       Class.new(ActiveRecord::Base) do
         self.table_name = "posts"
         include SqliteSearch::Model
+
         vec_scope :euc, against: :body, dimensions: 3, distance: :euclidean
       end
     end

@@ -1,10 +1,12 @@
 # frozen_string_literal: true
+
 require "test_helper"
 require "stringio"
 
 class VecMigrationTest < SqliteSearch::TestCase
   class Runner
     include SqliteSearch::Migration
+
     def connection = ActiveRecord::Base.connection
   end
 

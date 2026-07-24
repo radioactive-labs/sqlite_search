@@ -1,15 +1,20 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class RankTest < SqliteSearch::TestCase
   def setup
     @conn = ActiveRecord::Base.connection
-    @conn.create_table(:posts, force: true) { |t| t.string :title; t.text :body }
+    @conn.create_table(:posts, force: true) { |t|
+      t.string :title
+      t.text :body
+    }
     @conn.create_virtual_table("posts_full_fts", :fts5, ["title", "body", "tokenize = 'porter unicode61'"])
     @klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
-      fts5_scope :full, against: { title: 2.0, body: 1.0 }
+
+      fts5_scope :full, against: {title: 2.0, body: 1.0}
     end
     # match in body only (row 1) vs match in the higher-weighted title (row 2)
     @klass.create!(id: 1, title: "misc", body: "coffee coffee")

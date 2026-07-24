@@ -7,6 +7,7 @@ module SqliteSearch
   module Generators
     class VecGenerator < Rails::Generators::NamedBase
       include ActiveRecord::Generators::Migration
+
       source_root File.expand_path("templates", __dir__)
 
       class_option :index, type: :string, default: "semantic", desc: "Index/scope name (default: semantic)"

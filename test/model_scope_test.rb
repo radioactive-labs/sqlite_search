@@ -1,15 +1,20 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class ModelScopeTest < SqliteSearch::TestCase
   def setup
     conn = ActiveRecord::Base.connection
-    conn.create_table(:posts, force: true) { |t| t.string :title; t.text :body }
+    conn.create_table(:posts, force: true) { |t|
+      t.string :title
+      t.text :body
+    }
     conn.create_virtual_table("posts_by_body_fts", :fts5, ["body", "tokenize = 'porter unicode61'"])
 
     @post_class = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       fts5_scope :by_body, against: :body
     end
     # index two rows by hand (sync comes in Task 4)

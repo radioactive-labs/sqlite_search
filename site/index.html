@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>sqlite_search: full-text, vector, and hybrid search for Rails on SQLite</title>
+  <meta name="description" content="Full-text (FTS5/BM25), vector (sqlite-vec), and hybrid (RRF + optional rerank) search for ActiveRecord, living in the SQLite file you already ship. No separate search service to run, sync, or pay for. Works on Rails 8.0+.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#fdfdfc" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101317" media="(prefers-color-scheme: dark)">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="sqlite_search: full-text, vector, and hybrid search for Rails on SQLite">
+  <meta property="og:description" content="Search that lives in the SQLite file you already ship, not a separate service you have to run, sync, and pay for. Full-text, vector, and hybrid search for ActiveRecord.">
+  <meta property="og:url" content="https://radioactive-labs.github.io/sqlite_search/">
+  <meta property="og:image" content="https://radioactive-labs.github.io/sqlite_search/og.png">
+  <meta property="og:image:type" content="image/png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="sqlite_search: full-text, vector, and hybrid search for ActiveRecord, living in the SQLite file you already ship.">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="sqlite_search: full-text, vector, and hybrid search for Rails on SQLite">
+  <meta name="twitter:description" content="Search that lives in the SQLite file you already ship, not a separate service you have to run, sync, and pay for. Full-text, vector, and hybrid search for ActiveRecord.">
+  <meta name="twitter:image" content="https://radioactive-labs.github.io/sqlite_search/og.png">
+  <script>
+    // Restore the saved theme before first paint, so there's no flash on refresh.
+    (function () {
+      try {
+        var t = localStorage.getItem("sqlite_search-theme");
+        if (t) document.documentElement.setAttribute("data-theme", t);
+      } catch (e) {}
+    })();
+  </script>
+  <style>
+    :root {
+      --bg:    #fdfdfc;
+      --fg:    #1c1f24;
+      --soft:  #5b636e;
+      --link:  #245bab;
+      --code-bg: #f2f3f5;
+      --rule:  #e3e5e8;
+      --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+      --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101317; --fg: #d9dde3; --soft: #8b93a0; --link: #7aa6e8;
+        --code-bg: #191d23; --rule: #262b32;
+      }
+    }
+    :root[data-theme="light"] { --bg:#fdfdfc; --fg:#1c1f24; --soft:#5b636e; --link:#245bab; --code-bg:#f2f3f5; --rule:#e3e5e8; }
+    :root[data-theme="dark"]  { --bg:#101317; --fg:#d9dde3; --soft:#8b93a0; --link:#7aa6e8; --code-bg:#191d23; --rule:#262b32; }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: var(--sans);
+      font-size: 18px;
+      line-height: 1.62;
+      -webkit-font-smoothing: antialiased;
+    }
+    .page { max-width: 48rem; margin: 0 auto; padding: 4.5rem 1.5rem 5rem; position: relative; }
+
+    .theme-toggle {
+      position: absolute; top: 1.5rem; right: 1.5rem;
+      font-family: var(--mono); font-size: 0.74rem; color: var(--soft);
+      background: none; border: 0; cursor: pointer; padding: 0.2rem;
+      text-decoration: underline; text-underline-offset: 2px;
+    }
+    .theme-toggle:hover { color: var(--link); }
+
+    h1 {
+      font-family: var(--mono);
+      font-size: 1.5rem;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin: 0 0 1.4rem;
+    }
+    h2 {
+      font-size: 1.02rem;
+      font-weight: 600;
+      margin: 2.8rem 0 0.9rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--rule);
+      color: var(--fg);
+    }
+    p { margin: 0 0 1.1rem; }
+    .lede { font-size: 1.12rem; }
+    .sub { color: var(--soft); }
+    a { color: var(--link); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+    a:hover { text-decoration-thickness: 2px; }
+
+    .badges { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.2rem 0 1.8rem; align-items: center; }
+    .badges a { display: inline-flex; text-decoration: none; }
+    .badges img { height: 20px; display: block; }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.86em;
+      background: var(--code-bg);
+      padding: 0.1em 0.35em;
+      border-radius: 3px;
+    }
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--rule);
+      border-radius: 4px;
+      padding: 0.95rem 1.1rem;
+      overflow-x: auto;
+      margin: 0 0 1.1rem;
+      line-height: 1.55;
+    }
+    pre code { background: none; padding: 0; font-size: 0.8rem; }
+    .cmt { color: var(--soft); }
+
+    ul { margin: 0 0 1.1rem; padding-left: 1.2rem; }
+    li { margin-bottom: 0.5rem; }
+    li b { font-weight: 600; }
+
+    .links { list-style: none; padding: 0; margin: 0.4rem 0 0; }
+    .links li { margin-bottom: 0.55rem; display: flex; gap: 0.7rem; }
+    .links .what { color: var(--soft); min-width: 6.5rem; display: inline-block; }
+
+    footer {
+      margin-top: 3.2rem; padding-top: 1.1rem; border-top: 1px solid var(--rule);
+      font-family: var(--mono); font-size: 0.78rem; color: var(--soft);
+    }
+    :focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <button id="theme-toggle" class="theme-toggle" type="button">dark mode</button>
+    <h1>sqlite_search</h1>
+
+    <p class="lede">Search that lives in the SQLite file you already ship, not a separate service you have to run, sync, and pay for. Full-text, vector, and hybrid search for ActiveRecord, built on the database you already have.</p>
+
+    <p class="sub">The moment you add search to a SQLite-backed Rails app, the options thin out. <code>pg_search</code> is Postgres only. A hosted search service is another process to deploy, a second copy of your data to keep in sync, and a bill. Hand-rolling FTS5 works right up until you are writing raw-SQL migrations for a virtual table that will not survive a <code>schema.rb</code> dump, keeping the index in sync by hand, and escaping user input into a <code>MATCH</code> expression so one stray quote does not 500 your search. sqlite_search does that work for you: declare which columns to index and you get a query scope, kept in sync, safe against untrusted input, and restorable from <code>schema.rb</code>.</p>
+
+    <p class="badges">
+      <a href="https://rubygems.org/gems/sqlite_search"><img alt="Gem Version" src="https://img.shields.io/gem/v/sqlite_search"></a>
+      <a href="https://github.com/radioactive-labs/sqlite_search/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/radioactive-labs/sqlite_search/actions/workflows/ci.yml/badge.svg"></a>
+      <a href="https://github.com/radioactive-labs/sqlite_search/blob/main/MIT-LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg"></a>
+    </p>
+
+    <h2>Install</h2>
+    <pre><code><span class="cmt"># Gemfile</span>
+gem "sqlite_search"</code></pre>
+    <p class="sub">Then <code>bundle install</code>. In a Rails app the model concern and the migration helpers are wired in automatically.</p>
+
+    <h2>The 30-second tour</h2>
+    <p>Declare a search index in a migration, add one line to the model, and query it:</p>
+    <pre><code><span class="cmt"># db/migrate/xxxx_create_posts_search.rb</span>
+class CreatePostsSearch &lt; ActiveRecord::Migration[8.0]
+  def change
+    create_fts5_index :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
+  end
+end
+
+<span class="cmt"># app/models/post.rb</span>
+class Post &lt; ApplicationRecord
+  include SqliteSearch::Model
+  fts5_scope :search, against: { title: 2.0, body: 1.0 }
+end
+
+<span class="cmt"># anywhere</span>
+Post.search("morning coffee")                    <span class="cmt"># a normal, chainable relation</span>
+Post.search("coffee").order_by_rank.first.search_rank
+Post.where(author_id: 7).search("coffee")        <span class="cmt"># searches only that author's posts</span></code></pre>
+    <p class="sub">The scope is an ordinary <code>ActiveRecord::Relation</code>, so it composes with the rest of your query. User input is sanitized into a safe <code>MATCH</code> expression for you, so you can pass <code>params[:q]</code> straight through.</p>
+
+    <h2>Three kinds of search, one DSL</h2>
+    <ul>
+      <li><b>Full-text.</b> SQLite's FTS5 module with BM25 relevance ranking. A porter tokenizer folds case and accents and stems words by default, so a search for "running" also matches "run".</li>
+      <li><b>Vector (semantic).</b> <a href="https://github.com/asg017/sqlite-vec">sqlite-vec</a> through the <a href="https://github.com/ankane/neighbor">neighbor</a> gem, with your app supplying embeddings via a callback. Ranks rows by similarity instead of keywords.</li>
+      <li><b>Hybrid.</b> Runs a keyword search and a vector search together and fuses the rankings with Reciprocal Rank Fusion, catching both exact-term matches and semantic ones, with an optional reranking step.</li>
+    </ul>
+    <p class="sub">There are no database triggers and no background service to run. The virtual tables round-trip through <code>schema.rb</code> like any other table.</p>
+
+    <h2>Documentation</h2>
+    <ul class="links">
+      <li><span class="what">Guide &amp; API</span><a href="https://github.com/radioactive-labs/sqlite_search#readme">github.com/radioactive-labs/sqlite_search</a></li>
+      <li><span class="what">Gem</span><a href="https://rubygems.org/gems/sqlite_search">rubygems.org/gems/sqlite_search</a></li>
+      <li><span class="what">Source</span><a href="https://github.com/radioactive-labs/sqlite_search">View on GitHub</a></li>
+    </ul>
+
+    <footer>MIT License · Radioactive Labs</footer>
+  </div>
+
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var btn = document.getElementById("theme-toggle");
+      function effective() {
+        var t = root.getAttribute("data-theme");
+        if (t) return t;
+        return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      }
+      function label() { btn.textContent = (effective() === "dark" ? "light" : "dark") + " mode"; }
+      btn.addEventListener("click", function () {
+        var next = effective() === "dark" ? "light" : "dark";
+        root.setAttribute("data-theme", next);
+        try { localStorage.setItem("sqlite_search-theme", next); } catch (e) {}
+        label();
+      });
+      label();
+    })();
+  </script>
+</body>
+</html>

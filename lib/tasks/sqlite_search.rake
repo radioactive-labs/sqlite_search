@@ -6,7 +6,7 @@ namespace :sqlite_search do
     raise ArgumentError, "model is required" unless args[:model]
     klass = args[:model].constantize
     klass.reindex(args[:scope])
-    puts "Reindexed #{klass}#{args[:scope] ? " (#{args[:scope]})" : ""}."
+    puts "Reindexed #{klass}#{" (#{args[:scope]})" if args[:scope]}."
   end
 
   desc "Re-embed a vec index. Usage: rake sqlite_search:reembed[Post,semantic]"
@@ -14,6 +14,6 @@ namespace :sqlite_search do
     raise ArgumentError, "model is required" unless args[:model]
     klass = args[:model].constantize
     klass.reembed(args[:scope])
-    puts "Re-embedded #{klass}#{args[:scope] ? " (#{args[:scope]})" : ""}."
+    puts "Re-embedded #{klass}#{" (#{args[:scope]})" if args[:scope]}."
   end
 end

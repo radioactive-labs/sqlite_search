@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "test_helper"
 require "rails/generators"
 require "generators/sqlite_search/fts5_generator"

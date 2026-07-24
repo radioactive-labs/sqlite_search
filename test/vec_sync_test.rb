@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "test_helper"
 
 class VecSyncTest < SqliteSearch::TestCase
@@ -6,7 +7,10 @@ class VecSyncTest < SqliteSearch::TestCase
 
   def setup
     @conn = ActiveRecord::Base.connection
-    @conn.create_table(:posts, force: true) { |t| t.text :body; t.string :title }
+    @conn.create_table(:posts, force: true) { |t|
+      t.text :body
+      t.string :title
+    }
     @conn.create_virtual_table("posts_semantic_vec", "vec0", ["id integer primary key", "embedding float[3] distance_metric=cosine"])
   end
 
@@ -19,6 +23,7 @@ class VecSyncTest < SqliteSearch::TestCase
     Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
     end
   end
@@ -63,6 +68,7 @@ class VecSyncTest < SqliteSearch::TestCase
     async_klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 3 # default :async
     end
     assert_enqueued_with(job: SqliteSearch::EmbedJob) do
@@ -76,6 +82,7 @@ class VecSyncTest < SqliteSearch::TestCase
     async_klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 3
     end
     assert_enqueued_with(job: SqliteSearch::EmbedJob, queue: "embeddings") do
@@ -89,18 +96,23 @@ class VecSyncTest < SqliteSearch::TestCase
     bad_klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 5, sync: :inline # stub returns 3 dims
     end
     assert_raises(SqliteSearch::Error) { bad_klass.create!(id: 1, body: "coffee") }
   end
 
   def test_non_integer_primary_key_raises_on_sync
-    @conn.create_table(:docs, id: false, force: true) { |t| t.string :uid, primary_key: true; t.text :body }
+    @conn.create_table(:docs, id: false, force: true) { |t|
+      t.string :uid, primary_key: true
+      t.text :body
+    }
     @conn.create_virtual_table("docs_semantic_vec", "vec0", ["id integer primary key", "embedding float[3] distance_metric=cosine"])
     k = Class.new(ActiveRecord::Base) do
       self.table_name = "docs"
       self.primary_key = "uid"
       include SqliteSearch::Model
+
       vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
     end
     assert_raises(SqliteSearch::Error) { k.create!(uid: "abc", body: "coffee") }

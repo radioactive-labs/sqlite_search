@@ -1,4 +1,5 @@
 # frozen_string_literal: true
+
 require "test_helper"
 require "stringio"
 
@@ -6,6 +7,7 @@ class MigrationTest < SqliteSearch::TestCase
   # Minimal object exposing the connection so we can call the helper directly.
   class Runner
     include SqliteSearch::Migration
+
     def connection = ActiveRecord::Base.connection
   end
 
@@ -36,7 +38,7 @@ class MigrationTest < SqliteSearch::TestCase
   end
 
   def test_schema_dump_round_trips
-    Runner.new.create_fts5_index(:posts, :full, against: { title: 2, body: 1 })
+    Runner.new.create_fts5_index(:posts, :full, against: {title: 2, body: 1})
     io = StringIO.new
     ActiveRecord::SchemaDumper.dump(@conn.pool, io)
     dump = io.string
