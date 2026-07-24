@@ -3,6 +3,8 @@
 require "active_record"
 require "sqlite_search/version"
 require "sqlite_search/errors"
+require "sqlite_search/config"
+require "sqlite_search/vec"
 require "sqlite_search/query"
 require "sqlite_search/fts5"
 require "sqlite_search/migration"
