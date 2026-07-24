@@ -29,4 +29,25 @@ class QueryTest < SqliteSearch::TestCase
     assert_nil B.build("   ")
     assert_nil B.build("*** ---")
   end
+
+  def test_invalid_encoding_does_not_raise
+    input = "coffee \xFF\xFE shop".dup.force_encoding("UTF-8")
+    assert_equal "coffee AND shop", B.build(input)
+  end
+
+  def test_unbalanced_quote_falls_back_to_bare_words
+    assert_equal "a AND b", B.build('a "b')
+  end
+
+  def test_lone_quote_returns_nil
+    assert_nil B.build('"')
+  end
+
+  def test_column_filter_syntax_neutralized
+    assert_equal "body AND foo", B.build("body:foo")
+  end
+
+  def test_lowercase_operators_kept_as_literal_terms
+    assert_equal "a AND and AND b", B.build("a and b")
+  end
 end

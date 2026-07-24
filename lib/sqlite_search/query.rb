@@ -2,9 +2,11 @@
 
 module SqliteSearch
   # Converts free user text into a safe FTS5 MATCH string.
-  # Only quoted phrases and [A-Za-z0-9_] term characters survive; everything
-  # else (FTS5 operators, punctuation) is dropped, so untrusted input cannot
-  # inject MATCH syntax. Terms are AND-joined. Returns nil when nothing usable.
+  # Only quoted phrases and term characters (Unicode alphanumerics and
+  # underscore; this does NOT strip to ASCII, so accented/non-Latin words
+  # like "café" or "日本語" survive) make it through; everything else (FTS5
+  # operators, punctuation) is dropped, so untrusted input cannot inject
+  # MATCH syntax. Terms are AND-joined. Returns nil when nothing usable.
   class Query
     PHRASE = /"([^"]+)"/
     TERM_CHARS = /[^[:alnum:]_]+/
@@ -15,7 +17,7 @@ module SqliteSearch
     end
 
     def initialize(raw, prefix: false)
-      @raw = raw.to_s
+      @raw = raw.to_s.scrub
       @prefix = prefix
     end
 
