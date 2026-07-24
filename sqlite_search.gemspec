@@ -8,14 +8,14 @@ Gem::Specification.new do |spec|
   spec.authors = ["Radioactive Labs"]
   spec.email = ["sfroelich01@gmail.com"]
   spec.homepage = "https://github.com/radioactive-labs/sqlite_search"
-  spec.summary = "Full-text, vector, and hybrid search for ActiveRecord, inside the SQLite database you already ship."
+  spec.summary = "Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite."
   spec.description = <<~DESC.tr("\n", " ").strip
-    Search that lives in the SQLite file you already ship, not a separate service
-    you have to run, sync, and pay for. sqlite_search gives an ActiveRecord model
-    full-text search (FTS5 with BM25 ranking), vector search (sqlite-vec through
-    the neighbor gem, with your app supplying embeddings), and hybrid search that
-    fuses the two with Reciprocal Rank Fusion and an optional reranking step, all
-    behind one declarative DSL. No database triggers, no background service, and a
+    Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite.
+    sqlite_search gives a model full-text search (FTS5 with BM25 ranking), vector
+    search (sqlite-vec through the neighbor gem, with your app supplying
+    embeddings), and hybrid search that fuses the two with Reciprocal Rank Fusion
+    and an optional reranking step, all behind one declarative DSL. No search
+    cluster to run, no separate copy of your data, no database triggers, and a
     schema that restores cleanly from schema.rb.
   DESC
   spec.license = "MIT"

@@ -4,22 +4,22 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>sqlite_search: full-text, vector, and hybrid search for Rails on SQLite</title>
-  <meta name="description" content="Full-text (FTS5/BM25), vector (sqlite-vec), and hybrid (RRF + optional rerank) search for ActiveRecord, living in the SQLite file you already ship. No separate search service to run, sync, or pay for. Works on Rails 8.0+.">
+  <meta name="description" content="Full-text (FTS5/BM25), vector (sqlite-vec), and hybrid (RRF + optional rerank) search for ActiveRecord, without leaving SQLite. No search cluster to run, no second copy of your data. Works on Rails 8.0+.">
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <meta name="theme-color" content="#fdfdfc" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#101317" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
   <meta property="og:title" content="sqlite_search: full-text, vector, and hybrid search for Rails on SQLite">
-  <meta property="og:description" content="Search that lives in the SQLite file you already ship, not a separate service you have to run, sync, and pay for. Full-text, vector, and hybrid search for ActiveRecord.">
+  <meta property="og:description" content="Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite. No search cluster to run, no second copy of your data to keep in sync.">
   <meta property="og:url" content="https://radioactive-labs.github.io/sqlite_search/">
   <meta property="og:image" content="https://radioactive-labs.github.io/sqlite_search/og.png">
   <meta property="og:image:type" content="image/png">
   <meta property="og:image:width" content="1200">
   <meta property="og:image:height" content="630">
-  <meta property="og:image:alt" content="sqlite_search: full-text, vector, and hybrid search for ActiveRecord, living in the SQLite file you already ship.">
+  <meta property="og:image:alt" content="sqlite_search: full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite.">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="sqlite_search: full-text, vector, and hybrid search for Rails on SQLite">
-  <meta name="twitter:description" content="Search that lives in the SQLite file you already ship, not a separate service you have to run, sync, and pay for. Full-text, vector, and hybrid search for ActiveRecord.">
+  <meta name="twitter:description" content="Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite. No search cluster to run, no second copy of your data to keep in sync.">
   <meta name="twitter:image" content="https://radioactive-labs.github.io/sqlite_search/og.png">
   <script>
     // Restore the saved theme before first paint, so there's no flash on refresh.
@@ -134,9 +134,9 @@
     <button id="theme-toggle" class="theme-toggle" type="button">dark mode</button>
     <h1>sqlite_search</h1>
 
-    <p class="lede">Search that lives in the SQLite file you already ship, not a separate service you have to run, sync, and pay for. Full-text, vector, and hybrid search for ActiveRecord, built on the database you already have.</p>
+    <p class="lede">Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite. Declare which columns are searchable and get a query scope. No search cluster to run, no second copy of your data to keep in sync.</p>
 
-    <p class="sub">The moment you add search to a SQLite-backed Rails app, the options thin out. <code>pg_search</code> is Postgres only. A hosted search service is another process to deploy, a second copy of your data to keep in sync, and a bill. Hand-rolling FTS5 works right up until you are writing raw-SQL migrations for a virtual table that will not survive a <code>schema.rb</code> dump, keeping the index in sync by hand, and escaping user input into a <code>MATCH</code> expression so one stray quote does not 500 your search. sqlite_search does that work for you: declare which columns to index and you get a query scope, kept in sync, safe against untrusted input, and restorable from <code>schema.rb</code>.</p>
+    <p class="sub">The usual options thin out fast on SQLite. <code>pg_search</code> is Postgres only. A hosted search service is another process to deploy and a bill to pay. Hand-rolling FTS5 works right up until you are writing raw-SQL migrations for a virtual table that will not survive a <code>schema.rb</code> dump, keeping the index in sync by hand, and escaping user input into a <code>MATCH</code> expression so one stray quote does not 500 your search, then doing all of it again for the next model. sqlite_search does that work for you: declare which columns to index and you get a query scope, kept in sync, safe against untrusted input, and restorable from <code>schema.rb</code>.</p>
 
     <p class="badges">
       <a href="https://rubygems.org/gems/sqlite_search"><img alt="Gem Version" src="https://img.shields.io/gem/v/sqlite_search"></a>

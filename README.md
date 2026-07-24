@@ -4,20 +4,18 @@
 [![CI](https://github.com/radioactive-labs/sqlite_search/actions/workflows/ci.yml/badge.svg)](https://github.com/radioactive-labs/sqlite_search/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
-**Search that lives in the SQLite file you already ship, not a separate service
-you have to run, sync, and pay for.** Full-text, vector, and hybrid search for
-ActiveRecord, built on the database you already have.
+**Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite.**
+Declare which columns are searchable and get a query scope. No search cluster to
+run, no second copy of your data to keep in sync.
 
-The moment you add search to a SQLite-backed Rails app, the options thin out.
-`pg_search` is Postgres only. A hosted search service is another process to
-deploy, a second copy of your data to keep in sync, and a bill. Hand-rolling
-FTS5 works right up until you are writing raw-SQL migrations for a virtual table
-that will not survive a `schema.rb` dump, keeping the index in sync by hand,
-escaping user input into a `MATCH` expression so one stray quote does not 500
-your search, and then doing all of it again for the next model. sqlite_search
-does that work for you: declare which columns to index and you get a query
-scope, kept in sync, safe against untrusted input, and restorable from
-`schema.rb`.
+The usual options thin out fast on SQLite. `pg_search` is Postgres only. A hosted
+search service is another process to deploy and a bill to pay. Hand-rolling FTS5
+works right up until you are writing raw-SQL migrations for a virtual table that
+will not survive a `schema.rb` dump, keeping the index in sync by hand, and
+escaping user input into a `MATCH` expression so one stray quote does not 500 your
+search, then doing all of it again for the next model. sqlite_search does that
+work for you: declare which columns to index and you get a query scope, kept in
+sync, safe against untrusted input, and restorable from `schema.rb`.
 
 It covers three kinds of search behind one DSL. Full-text uses SQLite's FTS5
 module with BM25 relevance ranking. Vector (semantic) search uses
