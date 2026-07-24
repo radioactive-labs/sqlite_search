@@ -13,6 +13,10 @@ module SqliteSearch
         "or declare the scope with `vec_scope ..., sync: :inline`."
     end
     job = Class.new(ActiveJob::Base) do
+      # Evaluated at enqueue time, so it picks up config set after the job is
+      # defined. Falls back to ActiveJob's :default queue when unconfigured.
+      queue_as { SqliteSearch.config.job_queue || :default }
+
       def perform(model_name, id, scope_name)
         klass = model_name.constantize
         record = klass.find_by(klass.primary_key => id)

@@ -184,6 +184,12 @@ embed synchronously in the callback instead (also required if your app doesn't u
 vec_scope :semantic, against: [:title, :body], dimensions: 768, sync: :inline
 ```
 
+`SqliteSearch::EmbedJob` runs on ActiveJob's `:default` queue unless you route it elsewhere:
+
+```ruby
+SqliteSearch.config.job_queue = :embeddings
+```
+
 ### 4. Query
 
 ```ruby

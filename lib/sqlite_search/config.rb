@@ -2,7 +2,9 @@
 
 module SqliteSearch
   class Configuration
-    attr_accessor :embedder
+    # embedder: block |text, model:, scope:| -> Array<Float>
+    # job_queue: the ActiveJob queue name EmbedJob is enqueued to (default: :default)
+    attr_accessor :embedder, :job_queue
   end
 
   def self.config

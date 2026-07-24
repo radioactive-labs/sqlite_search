@@ -70,6 +70,21 @@ class VecSyncTest < SqliteSearch::TestCase
     end
   end
 
+  def test_async_uses_configured_job_queue
+    original = SqliteSearch.config.job_queue
+    SqliteSearch.config.job_queue = :embeddings
+    async_klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+      include SqliteSearch::Model
+      vec_scope :semantic, against: :body, dimensions: 3
+    end
+    assert_enqueued_with(job: SqliteSearch::EmbedJob, queue: "embeddings") do
+      async_klass.create!(id: 6, body: "coffee")
+    end
+  ensure
+    SqliteSearch.config.job_queue = original
+  end
+
   def test_dimension_mismatch_raises
     bad_klass = Class.new(ActiveRecord::Base) do
       self.table_name = "posts"
