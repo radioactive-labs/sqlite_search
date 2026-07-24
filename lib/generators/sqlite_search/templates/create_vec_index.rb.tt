@@ -1,0 +1,5 @@
+class Create<%= migration_class_suffix %> < ActiveRecord::Migration[<%= migration_version %>]
+  def change
+    create_vec_index :<%= table_name %>, :<%= index_name %>, dimensions: <%= dimensions %>
+  end
+end

@@ -3,8 +3,10 @@
 Full-text search for ActiveRecord on SQLite, built directly on [FTS5](https://sqlite.org/fts5.html) virtual
 tables. Declare which columns to index, optionally weight them, and get a query scope, prefix search,
 BM25-based relevance ranking, and a reindex path — with no triggers and a schema that round-trips cleanly
-through `schema.rb`. Vector search (sqlite-vec) and hybrid (FTS5 + vector) search are on the roadmap but not
-implemented yet; this gem currently ships FTS5 only.
+through `schema.rb`. Vector (semantic) search is also available, built on
+[sqlite-vec](https://github.com/asg017/sqlite-vec) through the [`neighbor`](https://github.com/ankane/neighbor)
+gem, with your app supplying embeddings via a callback. Hybrid (FTS5 + vector) search is still on the
+roadmap.
 
 ## Install
 
@@ -115,6 +117,102 @@ rake sqlite_search:reindex[Post]   # scope omitted -> rebuild all
 `reindex` truncates and repopulates the FTS5 table directly from the base table, so it's the recovery path
 whenever the index and the base table have drifted (see Limitations below).
 
+## Vector search
+
+Semantic (embedding-based, cosine-similarity) search via [sqlite-vec](https://github.com/asg017/sqlite-vec)
+through the [`neighbor`](https://github.com/ankane/neighbor) gem. `sqlite_search` doesn't generate embeddings
+itself — your app supplies them via a callback — it stores them in a `vec0` virtual table and gives you a
+KNN query scope.
+
+This is optional functionality: add the `neighbor` and `sqlite-vec` gems to your Gemfile before using it.
+
+```ruby
+gem "neighbor"
+gem "sqlite-vec"
+```
+
+### 1. Register an embedder
+
+```ruby
+SqliteSearch.embedder do |text, model:, scope:|
+  MyEmbeddingClient.embed(text) # returns an Array<Float> matching the scope's `dimensions`
+end
+```
+
+The block receives the text to embed (the configured `against:` columns joined), the model class, and the
+scope name, and must return an `Array<Float>` with exactly `dimensions` elements.
+
+### 2. Create the vec index in a migration
+
+Use the `create_vec_index` migration helper:
+
+```ruby
+class CreateSemanticVec < ActiveRecord::Migration[8.0]
+  def change
+    create_vec_index :posts, :semantic, dimensions: 768
+  end
+end
+```
+
+The resulting virtual table is named `<table>_<index>_vec` (e.g. `posts_semantic_vec`) and is created with
+`create_virtual_table`, so it shows up in `schema.rb` like any other table. As with FTS5, you can generate
+this migration instead of writing it by hand:
+
+```
+rails g sqlite_search:vec Post --index semantic --dimensions 768
+```
+
+This generates `db/migrate/..._create_semantic_vec.rb` calling `create_vec_index :posts, :semantic,
+dimensions: 768`. `--index` defaults to `semantic`; `--dimensions` is required.
+
+### 3. Declare the scope on the model
+
+```ruby
+class Post < ApplicationRecord
+  include SqliteSearch::Model
+
+  vec_scope :semantic, against: [:title, :body], dimensions: 768
+end
+```
+
+`vec_scope` defines a named scope on the model and wires up `after_save_commit` / `after_destroy_commit`
+callbacks that keep the vec table in sync whenever any of the `against:` columns change. By default,
+embedding happens **asynchronously** via an ActiveJob (`SqliteSearch::EmbedJob`); pass `sync: :inline` to
+embed synchronously in the callback instead (also required if your app doesn't use ActiveJob):
+
+```ruby
+vec_scope :semantic, against: [:title, :body], dimensions: 768, sync: :inline
+```
+
+### 4. Query
+
+```ruby
+Post.semantic("query text", k: 20, threshold: 0.3)
+Post.semantic("query text").where(published: true) # composes with normal AR scopes (see limitations)
+```
+
+- `k:` caps the number of nearest neighbors fetched (default 20).
+- `threshold:` (optional) drops hits whose cosine similarity falls below it.
+- A blank/nil query returns an empty relation (`.none`) rather than matching everything or raising.
+- Records loaded via `.semantic` expose a `<name>_similarity` reader (e.g. `semantic_similarity`), a cosine
+  similarity in `[-1, 1]` (higher is more similar).
+
+### 5. Backfilling / re-embedding
+
+```ruby
+Post.reembed(:semantic) # re-embed every row for one named vec index
+Post.reembed            # re-embed every vec_scope defined on the model
+```
+
+or from the command line:
+
+```
+rake sqlite_search:reembed[Post,semantic]
+```
+
+Run this after `create_vec_index` to embed existing rows (the migration itself does not backfill), or
+whenever the vec table and the base table have drifted (e.g. after a bulk update that skipped callbacks).
+
 ## Limitations
 
 1. **ActiveRecord 8.0+.** The migration helper and its `schema.rb` round-trip rely on `create_virtual_table`,
@@ -123,26 +221,45 @@ whenever the index and the base table have drifted (see Limitations below).
 2. **SQLite only.** This gem is built directly on SQLite's `FTS5` virtual table module; the SQLite library
    your app links against must have FTS5 compiled in (true of the `sqlite3` gem's bundled SQLite, and of
    most modern system SQLite builds).
-2. **Integer primary keys only.** FTS5 virtual tables use `rowid` as their key, and SQLite `rowid` is
+3. **Integer primary keys only.** FTS5 virtual tables use `rowid` as their key, and SQLite `rowid` is
    always an integer. Models with a string/UUID primary key cannot be indexed — `fts5_scope`'s sync
    callback raises `SqliteSearch::Error` with a clear message if it ever sees a non-integer primary key,
    rather than letting the write fail with a cryptic `SQLite3::MismatchException` deep in the driver.
-3. **Sync is via ActiveRecord `after_*_commit` callbacks, not database triggers.** Anything that changes
+4. **Sync is via ActiveRecord `after_*_commit` callbacks, not database triggers.** Anything that changes
    rows without running AR callbacks — `insert_all`, `update_all`, `delete_all`, raw SQL, another
    process/connection writing to the table — will *not* update the FTS5 index. Run `Model.reindex` (or the
    `sqlite_search:reindex` rake task) after any such bulk operation to bring the index back in sync.
-4. **Callback-sync failures leave the base row committed.** The sync callback runs in `after_save_commit`,
+5. **Callback-sync failures leave the base row committed.** The sync callback runs in `after_save_commit`,
    i.e. *after* the base record's transaction has already committed. If it raises (e.g. the integer-PK
    guard above), that exception propagates out of `save!`/`create!`, so the call looks like it failed —
    but the base record **is** already saved in the database; only the FTS5 write was skipped/rolled back.
    Callers should not assume a raised exception from `create!`/`update!`/`save!` means nothing was
    persisted, and should treat the index as potentially stale until the next `reindex`.
-5. **No database triggers are used.** The FTS5 table is created and modified only via
+6. **No database triggers are used.** The FTS5 table is created and modified only via
    `create_virtual_table`/DML executed through Rails migrations and the sync callbacks above, which keeps
    the whole setup representable in and restorable from `schema.rb` — there is nothing hidden in the
    database that a fresh `db:schema:load` would fail to reproduce.
-6. **Missing FTS5 table raises a raw SQLite error.** If a scope is queried (or a record is saved) before
+7. **Missing FTS5 table raises a raw SQLite error.** If a scope is queried (or a record is saved) before
    its migration has run, you'll get a plain `no such table: <table>_<scope>_fts` error rather than a
    dedicated actionable one — run the migration (or the `sqlite_search:fts5` generator) to create it. A
    friendlier error here is a planned improvement; it's non-trivial because ActiveRecord 8.1 hides virtual
    tables from `table_exists?`.
+8. **Vector search needs the optional `neighbor` and `sqlite-vec` gems.** Neither is a dependency of
+   `sqlite_search` itself; add both to your Gemfile before declaring a `vec_scope`. Note that `sqlite-vec`
+   ships prebuilt native extensions and has no gem build for musl-based platforms (e.g. Alpine).
+9. **Cosine distance only, in this version.** `vec_scope`/`create_vec_index` only support
+   `distance: :cosine`; euclidean and inner-product distance are not exposed and are planned for a future
+   release.
+10. **Async by default — new rows are not immediately KNN-findable.** Embedding happens in a background
+    `SqliteSearch::EmbedJob` by default, so a record saved just now may not show up in `.semantic` results
+    until that job runs. Pass `sync: :inline` to `vec_scope` for synchronous embedding (also required if
+    your app doesn't use ActiveJob).
+11. **`.semantic` is eager, unlike ordinary AR scopes.** Calling it runs the embed call and the KNN query
+    immediately, rather than building a lazy relation — so calling it twice embeds (and queries) twice. Be
+    careful chaining it inside code that might invoke the scope more than once.
+12. **Filtering after `.semantic` narrows the already-retrieved top-k; it does not constrain the ANN
+    search.** `Post.semantic("query").where(published: true)` first fetches the `k` nearest neighbors, then
+    filters that result set — it will not necessarily return `k` published posts. Raise `k` to compensate
+    if you need more results after filtering.
+13. **Integer primary keys only.** Same restriction as FTS5 above (see limitation 3) — vec tables use
+    `rowid`/an integer primary key column.
