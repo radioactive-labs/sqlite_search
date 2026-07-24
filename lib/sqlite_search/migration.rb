@@ -18,11 +18,15 @@ module SqliteSearch
       backfill_fts5_index(table, fts_table, columns, primary_key) if backfill
     end
 
-    def create_vec_index(table, name, dimensions:, distance: :cosine, primary_key: "id")
+    # v0.2 vec indexes are always keyed by an integer `id` column (holding the
+    # source row's primary-key value) and use cosine distance — the only metric
+    # vec_scope supports today. No distance:/primary_key: knobs until those are
+    # actually honored downstream.
+    def create_vec_index(table, name, dimensions:)
       vec_table = "#{table}_#{name}_vec"
       connection.create_virtual_table(vec_table, :vec0, [
-        "#{primary_key} integer primary key",
-        "embedding float[#{dimensions}] distance_metric=#{distance}"
+        "id integer primary key",
+        "embedding float[#{dimensions}] distance_metric=cosine"
       ])
     end
 
