@@ -37,6 +37,13 @@ class HybridTest < SqliteSearch::TestCase
     assert_operator rows.first.search_score, :>, 0.0
   end
 
+  def test_score_is_a_real_attribute_on_first
+    # search_score is a selected column, so it survives the .first load path,
+    # not just .to_a (it is a queried attribute, not a singleton method).
+    top = @klass.search("coffee").first
+    assert_operator top.search_score.to_f, :>, 0.0
+  end
+
   def test_blank_returns_none
     assert_equal [], @klass.search("").to_a
     assert_equal [], @klass.search(nil).to_a

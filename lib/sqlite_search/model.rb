@@ -101,18 +101,15 @@ module SqliteSearch
 
           ids = hits.map(&:first)
           distances = hits.to_h
-          order = Arel.sql("CASE #{quoted_table_name}.#{pkc} " +
-            ids.each_with_index.map { |id, i| "WHEN #{connection.quote(id)} THEN #{i}" }.join(" ") + " END")
-          decorate = Module.new do
-            define_method(:records) do
-              super().each do |rec|
-                d = distances[rec.id]
-                rec.define_singleton_method(definition.distance_method) { d }
-                rec.define_singleton_method(definition.similarity_method) { 1.0 - d } if definition.cosine?
-              end
-            end
+          pk_sql = "#{quoted_table_name}.#{pkc}"
+          # Order and per-row scores are computed in Ruby (from the KNN), so carry
+          # them as selected CASE columns: <name>_distance is then a real attribute.
+          order = Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, connection))
+          cols = ["#{quoted_table_name}.*", "#{SqliteSearch::Sql.id_case(pk_sql, distances, connection)} AS #{definition.distance_method}"]
+          if definition.cosine?
+            cols << "#{SqliteSearch::Sql.id_case(pk_sql, distances.transform_values { |d| 1.0 - d }, connection)} AS #{definition.similarity_method}"
           end
-          where(primary_key => ids).order(order).extending(decorate)
+          where(primary_key => ids).order(order).select(cols.join(", "))
         end
 
         vec_cols = definition.column_names
@@ -177,15 +174,12 @@ module SqliteSearch
           fused = fused.first(limit)
           ids = fused.map(&:first)
           scores = fused.to_h
-          pkc = connection.quote_column_name(primary_key)
-          order = Arel.sql("CASE #{quoted_table_name}.#{pkc} " +
-            ids.each_with_index.map { |id, i| "WHEN #{connection.quote(id)} THEN #{i}" }.join(" ") + " END")
-          decorate = Module.new do
-            define_method(:records) do
-              super().each { |rec| rec.define_singleton_method(score_method) { scores[rec.id] } }
-            end
-          end
-          where(primary_key => ids).order(order).extending(decorate)
+          pk_sql = "#{quoted_table_name}.#{connection.quote_column_name(primary_key)}"
+          # Fused rank and score come from Ruby, so carry them as SQL: the score
+          # becomes a real <name>_score attribute (works with pluck, first, etc.).
+          order = Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, connection))
+          score_col = "#{SqliteSearch::Sql.id_case(pk_sql, scores, connection)} AS #{score_method}"
+          where(primary_key => ids).order(order).select("#{quoted_table_name}.*, #{score_col}")
         end
       end
     end

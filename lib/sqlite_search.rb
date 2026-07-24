@@ -3,6 +3,7 @@
 require "active_record"
 require "sqlite_search/version"
 require "sqlite_search/errors"
+require "sqlite_search/sql"
 require "sqlite_search/config"
 require "sqlite_search/vec"
 require "sqlite_search/vec/definition"
