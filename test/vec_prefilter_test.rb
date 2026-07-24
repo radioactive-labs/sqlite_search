@@ -11,10 +11,12 @@ class VecPrefilterTest < SqliteSearch::TestCase
       include SqliteSearch::Model
       vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
     end
-    # id 3 is closest to a "coffee" query but in tenant 2
+    # id 3 is closest to a "coffee" query but in tenant 2. Its body is an exact
+    # match for the query text so its embedding is unambiguously nearest
+    # (cosine similarity 1.0), beating id 1's "morning coffee" (~0.997).
     @klass.create!(id: 1, tenant_id: 1, body: "morning coffee")
     @klass.create!(id: 2, tenant_id: 1, body: "green tea")
-    @klass.create!(id: 3, tenant_id: 2, body: "coffee coffee coffee")
+    @klass.create!(id: 3, tenant_id: 2, body: "coffee")
   end
 
   def teardown
@@ -34,5 +36,13 @@ class VecPrefilterTest < SqliteSearch::TestCase
   def test_chained_still_exposes_similarity
     top = @klass.where(tenant_id: 1).semantic("coffee").to_a.first
     assert_operator top.semantic_similarity, :>, 0.5
+  end
+
+  def test_prefilter_distinguishes_from_postfilter_at_small_k
+    # Global nearest to "coffee" is id 3 (tenant 2). With k:1, a post-filter
+    # would return [] (top-1 is the wrong tenant, then filtered out); a true
+    # pre-filter returns id 1 (top-1 within tenant 1).
+    ids = @klass.where(tenant_id: 1).semantic("coffee", k: 1).to_a.map(&:id)
+    assert_equal [1], ids
   end
 end
