@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rails: ["8.0", "8.1"]
+    env:
+      RAILS_VERSION: ${{ matrix.rails }}
+    name: "Rails ${{ matrix.rails }}"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+      # Resolve fresh against the matrix RAILS_VERSION rather than the committed lock.
+      - run: rm -f Gemfile.lock && bundle install
+      - run: bundle exec rake test
