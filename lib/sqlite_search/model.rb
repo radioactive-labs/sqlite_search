@@ -2,6 +2,7 @@
 
 require "active_support/concern"
 require "sqlite_search/fts5/definition"
+require "sqlite_search/vec/definition"
 
 module SqliteSearch
   module Model
@@ -54,6 +55,45 @@ module SqliteSearch
       def reindex(name = nil)
         definitions = name ? [sqlite_search_fts5_definitions.fetch(name.to_sym)] : sqlite_search_fts5_definitions.values
         definitions.each { |definition| SqliteSearch::Fts5::Backend.new(definition).rebuild(self) }
+      end
+
+      def sqlite_search_vec_definitions
+        own = (@sqlite_search_vec_definitions ||= {})
+        return own unless superclass.respond_to?(:sqlite_search_vec_definitions)
+        superclass.sqlite_search_vec_definitions.merge(own)
+      end
+
+      def vec_scope(name, against:, dimensions:, distance: :cosine, embedder: nil, sync: :async)
+        SqliteSearch::Vec.load!
+        definition = SqliteSearch::Vec::Definition.new(
+          model: self, name: name, against: against, dimensions: dimensions, distance: distance, embedder: embedder
+        )
+        (@sqlite_search_vec_definitions ||= {})[definition.name] = definition
+
+        scope name, ->(query = nil, k: 20, threshold: nil) do
+          next none if query.nil? || query.to_s.strip.empty?
+
+          vector = definition.embed(query.to_s, record_model: self)
+          hits = definition.neighbor_model
+            .nearest_neighbors(:embedding, vector, distance: definition.distance)
+            .limit(k)
+            .map { |r| [r.id, 1.0 - r.neighbor_distance] }
+          hits = hits.select { |(_, sim)| sim >= threshold } if threshold
+          next none if hits.empty?
+
+          ids = hits.map(&:first)
+          sims = hits.to_h
+          pk = connection.quote_column_name(primary_key)
+          order = Arel.sql("CASE #{quoted_table_name}.#{pk} " +
+            ids.each_with_index.map { |id, i| "WHEN #{connection.quote(id)} THEN #{i}" }.join(" ") + " END")
+
+          decorate = Module.new do
+            define_method(:records) do
+              super().each { |rec| rec.define_singleton_method(definition.similarity_method) { sims[rec.id] } }
+            end
+          end
+          where(primary_key => ids).order(order).extending(decorate)
+        end
       end
     end
   end
