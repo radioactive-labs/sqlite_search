@@ -74,19 +74,25 @@ module SqliteSearch
           next none if query.nil? || query.to_s.strip.empty?
 
           vector = definition.embed(query.to_s, record_model: self)
-          hits = definition.neighbor_model
+
+          caller_conditions = all.only(:where, :joins)
+          src = connection.quote_table_name(table_name)
+          vec = connection.quote_table_name(definition.table_name)
+          pkc = connection.quote_column_name(primary_key)
+
+          knn = definition.neighbor_model
+            .joins("JOIN #{src} ON #{src}.#{pkc} = #{vec}.id")
+            .merge(caller_conditions)
             .nearest_neighbors(:embedding, vector, distance: definition.distance)
             .limit(k)
-            .map { |r| [r.id, 1.0 - r.neighbor_distance] }
+          hits = knn.map { |r| [r.id, 1.0 - r.neighbor_distance] }
           hits = hits.select { |(_, sim)| sim >= threshold } if threshold
           next none if hits.empty?
 
           ids = hits.map(&:first)
           sims = hits.to_h
-          pk = connection.quote_column_name(primary_key)
-          order = Arel.sql("CASE #{quoted_table_name}.#{pk} " +
+          order = Arel.sql("CASE #{quoted_table_name}.#{pkc} " +
             ids.each_with_index.map { |id, i| "WHEN #{connection.quote(id)} THEN #{i}" }.join(" ") + " END")
-
           decorate = Module.new do
             define_method(:records) do
               super().each { |rec| rec.define_singleton_method(definition.similarity_method) { sims[rec.id] } }
