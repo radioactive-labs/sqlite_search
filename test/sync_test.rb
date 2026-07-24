@@ -42,4 +42,45 @@ class SyncTest < SqliteSearch::TestCase
     p.update!(title: "changed") # title not indexed
     assert_equal 1, indexed_count("coffee") # still exactly one indexed row
   end
+
+  def test_blanking_indexed_field_removes_from_index
+    p = @klass.create!(body: "morning coffee")
+    assert_equal 1, indexed_count("coffee")
+    p.update!(body: "")
+    assert_equal 0, indexed_count("coffee")
+  end
+
+  def test_multi_column_partial_nil_indexes_present_columns
+    conn = ActiveRecord::Base.connection
+    conn.create_table(:articles, force: true) { |t| t.string :title; t.text :body }
+    conn.create_virtual_table("articles_full_fts", :fts5, ["title", "body", "tokenize = 'porter unicode61'"])
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "articles"
+      include SqliteSearch::Model
+      fts5_scope :full, against: { title: 2.0, body: 1.0 }
+    end
+    klass.create!(title: "coffee guide", body: nil)
+    count = conn.select_value("SELECT count(*) FROM articles_full_fts WHERE articles_full_fts MATCH 'coffee'")
+    assert_equal 1, count
+  ensure
+    conn = ActiveRecord::Base.connection
+    %w[articles_full_fts articles].each { |t| conn.execute("DROP TABLE IF EXISTS #{conn.quote_table_name(t)}") }
+  end
+
+  def test_non_integer_primary_key_raises_clear_error
+    conn = ActiveRecord::Base.connection
+    conn.create_table(:docs, id: false, force: true) { |t| t.string :uid, primary_key: true; t.text :body }
+    conn.create_virtual_table("docs_by_body_fts", :fts5, ["body", "tokenize = 'porter unicode61'"])
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "docs"
+      self.primary_key = "uid"
+      include SqliteSearch::Model
+      fts5_scope :by_body, against: :body
+    end
+    error = assert_raises(SqliteSearch::Error) { klass.create!(uid: "abc", body: "coffee") }
+    assert_match(/integer primary key/, error.message)
+  ensure
+    conn = ActiveRecord::Base.connection
+    %w[docs_by_body_fts docs].each { |t| conn.execute("DROP TABLE IF EXISTS #{conn.quote_table_name(t)}") }
+  end
 end

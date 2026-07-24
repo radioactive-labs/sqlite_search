@@ -12,6 +12,12 @@ module SqliteSearch
       def sync(record)
         record.class.with_connection do |conn|
           id = record.public_send(record.class.primary_key)
+          unless id.is_a?(Integer)
+            raise SqliteSearch::Error,
+              "sqlite_search FTS5 indexing requires an integer primary key (used as the FTS rowid), " \
+              "but #{record.class.name}##{record.class.primary_key} is #{id.class} (#{id.inspect}). " \
+              "FTS5 does not support non-integer rowids."
+          end
           conn.transaction do
             delete_row(conn, id)
             values = @definition.columns.map { |c| record.public_send(c) }
