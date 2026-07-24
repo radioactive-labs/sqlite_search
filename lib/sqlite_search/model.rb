@@ -9,16 +9,18 @@ module SqliteSearch
 
     class_methods do
       def sqlite_search_fts5_definitions
-        @sqlite_search_fts5_definitions ||= {}
+        own = (@sqlite_search_fts5_definitions ||= {})
+        return own unless superclass.respond_to?(:sqlite_search_fts5_definitions)
+        superclass.sqlite_search_fts5_definitions.merge(own)
       end
 
       def fts5_scope(name, against:, tokenizer: "porter unicode61")
         definition = Fts5::Definition.new(model: self, name: name, against: against, tokenizer: tokenizer)
-        sqlite_search_fts5_definitions[definition.name] = definition
+        (@sqlite_search_fts5_definitions ||= {})[definition.name] = definition
 
-        scope name, ->(query, prefix: false, raw: nil) do
+        scope name, ->(query = nil, prefix: false, raw: nil) do
           match = raw || SqliteSearch::Query.build(query, prefix: prefix)
-          next none if match.nil? || match.empty?
+          next none if match.nil? || match.to_s.empty?
 
           fts = connection.quote_table_name(definition.table_name)
           pk = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"

@@ -40,4 +40,21 @@ class ModelScopeTest < SqliteSearch::TestCase
     assert_kind_of ActiveRecord::Relation, rel
     assert_equal [1], rel.pluck(:id)
   end
+
+  def test_raw_option_bypasses_sanitizer
+    assert_equal [1, 2], @post_class.by_body(raw: "coffee OR tea").order(:id).pluck(:id)
+  end
+
+  def test_prefix_option_matches_prefix
+    assert_equal [1], @post_class.by_body("mor", prefix: true).pluck(:id) # "morning"
+  end
+
+  def test_keyword_only_call_without_query_returns_none
+    assert_equal [], @post_class.by_body(prefix: true).pluck(:id)
+  end
+
+  def test_definitions_inherited_by_subclass
+    sub = Class.new(@post_class)
+    assert sub.sqlite_search_fts5_definitions.key?(:by_body)
+  end
 end
