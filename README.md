@@ -241,7 +241,9 @@ end
 
 - `fts5:` / `vec:` name the `fts5_scope`/`vec_scope` to fuse. They must already be declared on the model —
   `hybrid_scope` raises `SqliteSearch::Error` at declaration time otherwise.
-- `k:` is the RRF constant (default 60); higher values flatten the influence of rank position.
+- `k:` is the RRF constant (default 60); higher values flatten the influence of rank position. This is a
+  different `k:` than `vec_scope`/`.semantic`'s `k:` (the neighbor count) — same name, different meaning;
+  `hybrid_scope` has no separate neighbor-count option of its own.
 
 ### 2. Query
 
@@ -318,10 +320,11 @@ results after filtering.
 2. **SQLite only.** This gem is built directly on SQLite's `FTS5` virtual table module; the SQLite library
    your app links against must have FTS5 compiled in (true of the `sqlite3` gem's bundled SQLite, and of
    most modern system SQLite builds).
-3. **Integer primary keys only.** FTS5 virtual tables use `rowid` as their key, and SQLite `rowid` is
-   always an integer. Models with a string/UUID primary key cannot be indexed — `fts5_scope`'s sync
-   callback raises `SqliteSearch::Error` with a clear message if it ever sees a non-integer primary key,
-   rather than letting the write fail with a cryptic `SQLite3::MismatchException` deep in the driver.
+3. **Integer primary keys only.** Both FTS5 and `vec0` virtual tables key rows by `rowid`/an integer id
+   column, and SQLite `rowid` is always an integer. Models with a string/UUID primary key cannot be
+   indexed by `fts5_scope` or `vec_scope` — the sync callback raises `SqliteSearch::Error` with a clear
+   message if it ever sees a non-integer primary key, rather than letting the write fail with a cryptic
+   `SQLite3::MismatchException` deep in the driver.
 4. **Sync is via ActiveRecord `after_*_commit` callbacks, not database triggers.** Anything that changes
    rows without running AR callbacks — `insert_all`, `update_all`, `delete_all`, raw SQL, another
    process/connection writing to the table — will *not* update the FTS5 index. Run `Model.reindex` (or the
@@ -351,9 +354,12 @@ results after filtering.
     `SqliteSearch::EmbedJob` by default, so a record saved just now may not show up in `.semantic` results
     until that job runs. Pass `sync: :inline` to `vec_scope` for synchronous embedding (also required if
     your app doesn't use ActiveJob).
-11. **`.semantic` is eager, unlike ordinary AR scopes.** Calling it runs the embed call and the KNN query
-    immediately, rather than building a lazy relation — so calling it twice embeds (and queries) twice. Be
-    careful chaining it inside code that might invoke the scope more than once.
+11. **`.semantic` and `.search` are eager, unlike ordinary AR scopes.** Calling `.semantic` runs the embed
+    call and the KNN query immediately, rather than building a lazy relation. Calling `.search` (a
+    `hybrid_scope`) is eager too, and does more work per call — it re-runs *both* arm queries, RRF fusion,
+    and any registered reranker (which may itself be a network call) every time. Calling either twice
+    repeats all of that work twice; be careful chaining them inside code that might invoke the scope more
+    than once, and avoid calling `.search`/`.semantic` inside a loop.
 12. **Only SQL-expressible conditions can be pushed into a pre-filter; Ruby-side-only conditions can't.**
     Chaining `.where`/`.joins` (and scopes built on them) before `.semantic`/`.search` pre-filters both the
     FTS5 and vec arms exactly (see [Filtering and multi-tenancy](#filtering-and-multi-tenancy)) — but a
@@ -369,5 +375,3 @@ results after filtering.
 14. **Each arm's candidate pool is capped before fusion.** A hybrid scope pulls `[limit * 3, 100].min`
     candidates from each of the FTS5 and vec arms before running RRF, so a very large `limit:` still fuses
     from at most 100 candidates per arm.
-15. **Integer primary keys only.** Same restriction as FTS5 above (see limitation 3) — vec tables use
-    `rowid`/an integer primary key column.

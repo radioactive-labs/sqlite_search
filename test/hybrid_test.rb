@@ -56,4 +56,16 @@ class HybridTest < SqliteSearch::TestCase
       end
     end
   end
+
+  def test_name_colliding_with_arm_scope_raises
+    assert_raises(SqliteSearch::Error) do
+      Class.new(ActiveRecord::Base) do
+        self.table_name = "posts"
+        include SqliteSearch::Model
+        fts5_scope :search, against: :body
+        vec_scope :semantic, against: :body, dimensions: 3
+        hybrid_scope :search, fts5: :search, vec: :semantic
+      end
+    end
+  end
 end

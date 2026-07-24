@@ -133,6 +133,9 @@ module SqliteSearch
       def hybrid_scope(name, fts5:, vec:, k: 60)
         fts5_name = fts5.to_sym
         vec_name = vec.to_sym
+        if name.to_sym == fts5_name || name.to_sym == vec_name
+          raise SqliteSearch::Error, "hybrid_scope :#{name} must not reuse its own fts5:/vec: scope name (it would overwrite that scope)."
+        end
         unless sqlite_search_fts5_definitions.key?(fts5_name)
           raise SqliteSearch::Error, "hybrid_scope :#{name} references fts5: :#{fts5_name}, but no such fts5_scope is declared on #{self.name}."
         end
