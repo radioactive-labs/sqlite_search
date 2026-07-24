@@ -20,7 +20,7 @@ Use the `create_fts5_table` migration helper (mixed into `ActiveRecord::Migratio
 app):
 
 ```ruby
-class CreatePostSearchFts5 < ActiveRecord::Migration[7.1]
+class CreateSearchFts5 < ActiveRecord::Migration[8.0]
   def change
     create_fts5_table :posts, :search, against: { title: 2.0, body: 1.0 }, backfill: true
   end
