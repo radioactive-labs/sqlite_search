@@ -8,15 +8,6 @@
 Declare which columns are searchable and get a query scope. No search cluster to
 run, no second copy of your data to keep in sync.
 
-The usual options thin out fast on SQLite. `pg_search` is Postgres only. A hosted
-search service is another process to deploy and a bill to pay. Hand-rolling FTS5
-works right up until you are writing raw-SQL migrations for a virtual table that
-will not survive a `schema.rb` dump, keeping the index in sync by hand, and
-escaping user input into a `MATCH` expression so one stray quote does not 500 your
-search, then doing all of it again for the next model. sqlite_search does that
-work for you: declare which columns to index and you get a query scope, kept in
-sync, safe against untrusted input, and restorable from `schema.rb`.
-
 It covers three kinds of search behind one DSL. Full-text uses SQLite's FTS5
 module with BM25 relevance ranking. Vector (semantic) search uses
 [sqlite-vec](https://github.com/asg017/sqlite-vec) through the
@@ -89,7 +80,7 @@ The second argument (`:search`) names the index. It becomes the FTS table name
 
 ```
 rails g sqlite_search:fts5 Post title body --weights 2,1
-rails g sqlite_search:fts5 Post body --index by_body   # a second index on the same model
+rails g sqlite_search:fts5 Post body --index search_body   # a second index on the same model
 ```
 
 The virtual table is created with `create_virtual_table`, so it appears in
@@ -107,7 +98,7 @@ end
 
 `fts5_scope` defines the `Post.search` scope and wires up `after_save_commit` and
 `after_destroy_commit` callbacks that keep the index in step whenever an indexed
-column changes. A model can declare more than one index (`fts5_scope :by_body,
+column changes. A model can declare more than one index (`fts5_scope :search_body,
 against: :body`) and each gets its own scope.
 
 ### Query
@@ -176,24 +167,24 @@ SqliteSearch.embedder do |text, model:, scope:|
 end
 ```
 
-The block receives the text (the `against:` columns joined), the model, and the
-scope name, so you can route to different embedding models per scope if you want.
+The block receives the text (the `against:` columns joined), the model class, and
+the scope name, so you can route to different embedding models per scope if you want.
 
 ### Create the index and declare the scope
 
 ```ruby
 # migration
-create_vec_index :posts, :semantic, dimensions: 768
+create_vec_index :posts, :semantic_search, dimensions: 768
 
 # model
-vec_scope :semantic, against: [:title, :body], dimensions: 768
+vec_scope :semantic_search, against: [:title, :body], dimensions: 768
 ```
 
-The vector table is `posts_semantic_vec`, a `vec0` virtual table that also
+The vector table is `posts_semantic_search_vec`, a `vec0` virtual table that also
 round-trips through `schema.rb`. A `rails g sqlite_search:vec Post --index
 semantic --dimensions 768` generator writes the migration. `create_vec_index`
 does not backfill (there is no text to embed at migration time), so run
-`Post.reembed(:semantic)` once afterward to embed existing rows.
+`Post.reembed(:semantic_search)` once afterward to embed existing rows.
 
 By default a save enqueues a background `SqliteSearch::EmbedJob` to do the
 embedding, so an expensive embedding call stays out of the request. Pass
@@ -201,7 +192,7 @@ embedding, so an expensive embedding call stays out of the request. Pass
 embedder is cheap or when your app does not use ActiveJob:
 
 ```ruby
-vec_scope :semantic, against: [:title, :body], dimensions: 768, sync: :inline
+vec_scope :semantic_search, against: [:title, :body], dimensions: 768, sync: :inline
 ```
 
 Route the job to a specific queue with `SqliteSearch.config.job_queue = :embeddings`.
@@ -209,7 +200,7 @@ Route the job to a specific queue with `SqliteSearch.config.job_queue = :embeddi
 ### Query
 
 ```ruby
-Post.semantic("a warm drink to start the day", k: 20, threshold: 0.3)
+Post.semantic_search("a warm drink to start the day", k: 20, threshold: 0.3)
 ```
 
 `k:` caps how many nearest neighbors to fetch (default 20). `threshold:` drops
@@ -220,22 +211,23 @@ blank or nil query returns `.none`.
 Re-embed after a bulk write the same way you reindex FTS5:
 
 ```ruby
-Post.reembed(:semantic)   # or rake sqlite_search:reembed[Post,semantic]
+Post.reembed(:semantic_search)   # or rake sqlite_search:reembed[Post,semantic_search]
 ```
 
 ## Hybrid search
 
-Hybrid search runs a keyword search and a vector search together and fuses their
-rankings, which catches both exact-term matches and semantic ones. It reuses an
-`fts5_scope` and a `vec_scope` you have already declared:
+Hybrid search runs the keyword search and the vector search together, as two
+"arms", and fuses their rankings, which catches both exact-term matches and
+semantic ones. It reuses an `fts5_scope` and a `vec_scope` you have already
+declared:
 
 ```ruby
 class Post < ApplicationRecord
   include SqliteSearch::Model
 
-  fts5_scope :by_body, against: :body
-  vec_scope :semantic, against: :body, dimensions: 768, sync: :inline
-  hybrid_scope :search, fts5: :by_body, vec: :semantic
+  fts5_scope :search_body, against: :body
+  vec_scope :semantic_search, against: :body, dimensions: 768, sync: :inline
+  hybrid_scope :search, fts5: :search_body, vec: :semantic_search
 end
 ```
 
@@ -267,10 +259,10 @@ SqliteSearch.reranker do |query, documents, model:, scope:|
 end
 ```
 
-`model:` is the relation the scope was called on, not the bare class, so use
-`model.klass` if you need the class. `scope:` is the hybrid scope name. Reranking
-is best-effort: if the block raises, the failure is logged and the search falls
-back to the fused order, so a broken reranker never takes down a search.
+`model:` is the model class the scope was declared on, and `scope:` is the hybrid
+scope name (the same pair is passed to the embedder block). Reranking is
+best-effort: if the block raises, the failure is logged and the search falls back
+to the fused order, so a broken reranker never takes down a search.
 
 ## Filtering and multi-tenancy
 
@@ -279,7 +271,7 @@ pre-filter, not a post-filter:
 
 ```ruby
 Post.where(tenant_id: 5).published.search("coffee")   # pre-filters both arms
-Post.where(tenant_id: 5).semantic("coffee")           # pre-filters the KNN scan
+Post.where(tenant_id: 5).semantic_search("coffee")           # pre-filters the KNN scan
 ```
 
 The keyword arm uses the ordinary `WHERE`/`JOIN` SQL that ActiveRecord already
@@ -287,7 +279,7 @@ builds for the chained scope. The vector arm joins back to the source table
 before the scan runs. That pre-filter is exact rather than approximate, because
 `vec0`'s KNN is a brute-force scan to begin with, so folding in your conditions
 just narrows what it scans. Concretely,
-`Post.where(tenant_id: 5).semantic("coffee", k: 10)` returns the 10 nearest
+`Post.where(tenant_id: 5).semantic_search("coffee", k: 10)` returns the 10 nearest
 neighbors within tenant 5, not the global top 10 trimmed to tenant 5 afterward.
 
 Chaining a condition after the search is the escape hatch. It post-filters the
@@ -341,16 +333,16 @@ has no build for musl platforms such as Alpine.
 `distance: :cosine`. Euclidean and inner-product distance are planned.
 
 **Embedding is async by default.** A row saved right now may not appear in
-`.semantic` results until its `EmbedJob` runs. Use `sync: :inline` for immediate
+`.semantic_search` results until its `EmbedJob` runs. Use `sync: :inline` for immediate
 indexing (or if you do not use ActiveJob).
 
-**`.semantic` and `.search` are eager.** Unlike an ordinary scope, they run the
+**`.semantic_search` and `.search` are eager.** Unlike an ordinary scope, they run the
 embedding call and the queries the moment you call them rather than building a
 lazy relation. `.search` does the most work, re-running both arms, the fusion,
 and any reranker (possibly a network call) on every invocation, so do not call
 either one inside a loop.
 
-**Hybrid's vector arm has no relevance threshold.** A bare `.semantic` call takes
+**Hybrid's vector arm has no relevance threshold.** A bare `.semantic_search` call takes
 `threshold:`, but `hybrid_scope` does not, so the vector arm always feeds its
 nearest neighbors into the fusion even for a weak semantic match. Per-arm
 thresholds may come later.
@@ -358,3 +350,7 @@ thresholds may come later.
 **The candidate pool is capped.** A hybrid scope pulls `[limit * 3, 100].min`
 candidates from each arm before fusing, so a very large `limit:` still fuses from
 at most 100 per arm.
+
+## License
+
+Released under the [MIT License](MIT-LICENSE).

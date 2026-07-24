@@ -136,7 +136,7 @@
 
     <p class="lede">Full-text, vector, and hybrid search for ActiveRecord, without leaving SQLite. Declare which columns are searchable and get a query scope. No search cluster to run, no second copy of your data to keep in sync.</p>
 
-    <p class="sub">The usual options thin out fast on SQLite. <code>pg_search</code> is Postgres only. A hosted search service is another process to deploy and a bill to pay. Hand-rolling FTS5 works right up until you are writing raw-SQL migrations for a virtual table that will not survive a <code>schema.rb</code> dump, keeping the index in sync by hand, and escaping user input into a <code>MATCH</code> expression so one stray quote does not 500 your search, then doing all of it again for the next model. sqlite_search does that work for you: declare which columns to index and you get a query scope, kept in sync, safe against untrusted input, and restorable from <code>schema.rb</code>.</p>
+    <p class="sub">It covers three kinds of search behind one DSL. Full-text uses SQLite's FTS5 module with BM25 relevance ranking. Vector (semantic) search uses <a href="https://github.com/asg017/sqlite-vec">sqlite-vec</a> through the <a href="https://github.com/ankane/neighbor">neighbor</a> gem, with your app supplying embeddings via a callback. Hybrid search fuses the two with Reciprocal Rank Fusion and an optional reranking step. Works on Rails 8.0+.</p>
 
     <p class="badges">
       <a href="https://rubygems.org/gems/sqlite_search"><img alt="Gem Version" src="https://img.shields.io/gem/v/sqlite_search"></a>

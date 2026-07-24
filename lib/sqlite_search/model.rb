@@ -73,7 +73,7 @@ module SqliteSearch
         scope name, ->(query = nil, k: 20, threshold: nil) do
           next none if query.nil? || query.to_s.strip.empty?
 
-          vector = definition.embed(query.to_s, record_model: self)
+          vector = definition.embed(query.to_s, record_model: klass)
 
           caller_conditions = all.only(:where, :joins)
           src = connection.quote_table_name(table_name)
@@ -158,7 +158,7 @@ module SqliteSearch
           next none if fused.empty?
 
           reranker = rerank ? SqliteSearch.config.reranker : nil
-          fused = SqliteSearch::Hybrid.rerank(query, fused, model: self, scope_name: name.to_sym, reranker: reranker)
+          fused = SqliteSearch::Hybrid.rerank(query, fused, model: klass, scope_name: name.to_sym, reranker: reranker)
           next none if fused.empty?
           fused = fused.first(limit)
           ids = fused.map(&:first)
