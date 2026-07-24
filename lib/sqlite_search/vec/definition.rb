@@ -12,18 +12,16 @@ module SqliteSearch
         @name = name.to_sym
         @columns = SqliteSearch::Vec.columns_for(against)
         @dimensions = dimensions
-        @distance = distance
+        @distance = distance.to_sym
         @embedder = embedder
         @table_name = "#{model.table_name}_#{@name}_vec"
 
-        unless @distance.to_sym == :cosine
-          raise SqliteSearch::Error,
-            "vec_scope currently supports only distance: :cosine (got #{@distance.inspect}). " \
-            "Euclidean/inner-product similarity is planned."
-        end
+        SqliteSearch::Vec.vec0_metric(@distance) # validates the distance is supported
       end
 
       def column_names = columns.map(&:to_s)
+      def cosine? = distance == :cosine
+      def distance_method = "#{name}_distance"
       def similarity_method = "#{name}_similarity"
 
       def embed(text, record_model: model)

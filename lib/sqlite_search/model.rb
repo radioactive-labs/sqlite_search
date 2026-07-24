@@ -89,17 +89,27 @@ module SqliteSearch
             .merge(caller_conditions)
             .nearest_neighbors(:embedding, vector, distance: definition.distance)
             .limit(k)
-          hits = knn.map { |r| [r.id, 1.0 - r.neighbor_distance] }
-          hits = hits.select { |(_, sim)| sim >= threshold } if threshold
+          hits = knn.map { |r| [r.id, r.neighbor_distance] }
+          if threshold
+            hits = if definition.cosine?
+              hits.select { |(_, dist)| (1.0 - dist) >= threshold } # threshold = minimum cosine similarity
+            else
+              hits.select { |(_, dist)| dist <= threshold }         # threshold = maximum distance
+            end
+          end
           next none if hits.empty?
 
           ids = hits.map(&:first)
-          sims = hits.to_h
+          distances = hits.to_h
           order = Arel.sql("CASE #{quoted_table_name}.#{pkc} " +
             ids.each_with_index.map { |id, i| "WHEN #{connection.quote(id)} THEN #{i}" }.join(" ") + " END")
           decorate = Module.new do
             define_method(:records) do
-              super().each { |rec| rec.define_singleton_method(definition.similarity_method) { sims[rec.id] } }
+              super().each do |rec|
+                d = distances[rec.id]
+                rec.define_singleton_method(definition.distance_method) { d }
+                rec.define_singleton_method(definition.similarity_method) { 1.0 - d } if definition.cosine?
+              end
             end
           end
           where(primary_key => ids).order(order).extending(decorate)

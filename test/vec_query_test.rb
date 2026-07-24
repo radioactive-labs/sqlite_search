@@ -56,16 +56,4 @@ class VecQueryTest < SqliteSearch::TestCase
     assert_respond_to top, :semantic_similarity
     assert_operator top.semantic_similarity, :>, 0.5
   end
-
-  def test_non_cosine_distance_raises
-    err = assert_raises(SqliteSearch::Error) do
-      Class.new(ActiveRecord::Base) do
-        self.table_name = "posts"
-        include SqliteSearch::Model
-
-        vec_scope :euc, against: :body, dimensions: 3, distance: :euclidean
-      end
-    end
-    assert_match(/cosine/, err.message)
-  end
 end

@@ -187,6 +187,9 @@ semantic --dimensions 768` generator writes the migration. `create_vec_index`
 does not backfill (there is no text to embed at migration time), so run
 `Post.reembed(:semantic_search)` once afterward to embed existing rows.
 
+Both `create_vec_index` and `vec_scope` take a `distance:`: `:cosine` (the
+default), `:euclidean` (L2), or `:taxicab` (L1). Set the same one on both.
+
 By default a save enqueues a background `SqliteSearch::EmbedJob` to do the
 embedding, so an expensive embedding call stays out of the request. Pass
 `sync: :inline` to embed inside the callback instead, which you want when the
@@ -204,10 +207,12 @@ Route the job to a specific queue with `SqliteSearch.config.job_queue = :embeddi
 Post.semantic_search("a warm drink to start the day", k: 20, threshold: 0.3)
 ```
 
-`k:` caps how many nearest neighbors to fetch (default 20). `threshold:` drops
-hits below a cosine similarity you set. Each returned record exposes a
-`<name>_similarity` reader (a cosine similarity in `[-1, 1]`, higher is closer). A
-blank or nil query returns `.none`.
+`k:` caps how many nearest neighbors to fetch (default 20). Each returned record
+exposes a `<name>_distance` reader (the raw distance, smaller is closer), and a
+cosine scope also exposes `<name>_similarity` (`1 - distance`, in `[-1, 1]`, higher
+is closer). `threshold:` filters by relevance: on a cosine scope it is a minimum
+similarity, on a euclidean or taxicab scope it is a maximum distance. A blank or
+nil query returns `.none`.
 
 Re-embed after a bulk write the same way you reindex FTS5:
 
@@ -336,8 +341,11 @@ today because ActiveRecord 8.1 hides virtual tables from `table_exists?`.
 before declaring a `vec_scope`. `sqlite-vec` ships prebuilt native extensions and
 has no build for musl platforms such as Alpine.
 
-**Cosine distance only, for now.** `vec_scope` and `create_vec_index` support
-`distance: :cosine`. Euclidean and inner-product distance are planned.
+**Cosine, euclidean, and taxicab distance.** `vec_scope` and `create_vec_index`
+take `distance: :cosine` (the default), `:euclidean` (L2), or `:taxicab` (L1), and
+the two must agree. Inner-product distance is not offered: `neighbor` can compute
+it, but `vec0` does not accept it as a table `distance_metric` (only cosine, l2,
+and l1), so it would need a mismatched metric on the table.
 
 **Embedding is async by default.** A row saved right now may not appear in
 `.semantic_search` results until its `EmbedJob` runs. Use `sync: :inline` for immediate
