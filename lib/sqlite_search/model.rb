@@ -97,6 +97,7 @@ module SqliteSearch
 
         vec_cols = definition.column_names
         vec_sync = sync
+        SqliteSearch.ensure_embed_job! unless vec_sync == :inline
         after_save_commit do
           if (saved_changes.keys & vec_cols).any?
             backend = SqliteSearch::Vec::Backend.new(definition)

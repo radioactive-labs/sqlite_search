@@ -17,11 +17,16 @@ module SqliteSearch
 
         model = @definition.neighbor_model
         text = SqliteSearch::Vec.text_for(record, @definition.columns)
-        model.where(id: id).delete_all
-        return if text.empty?
+        if text.empty?
+          model.where(id: id).delete_all
+          return
+        end
 
-        vector = @definition.embed(text, record_model: record.class)
-        model.create!(id: id, embedding: vector)
+        vector = @definition.embed(text, record_model: record.class) # compute first; if this raises, old row is untouched
+        model.transaction do
+          model.where(id: id).delete_all
+          model.create!(id: id, embedding: vector)
+        end
       end
 
       def remove(record)

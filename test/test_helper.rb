@@ -3,6 +3,7 @@
 require "minitest/autorun"
 require "active_record"
 require "active_job"
+ActiveJob::Base.queue_adapter = :test
 require "sqlite_search"
 
 ActiveRecord::Base.establish_connection(adapter: "sqlite3", database: ":memory:")
