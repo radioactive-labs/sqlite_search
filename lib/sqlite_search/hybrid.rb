@@ -29,9 +29,7 @@ module SqliteSearch
           [id, scores[id]] if scores.key?(id)
         end
       rescue => e
-        if defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
-          Rails.logger.warn { "sqlite_search: rerank failed, using fused order (#{e.class}: #{e.message})" }
-        end
+        ActiveRecord::Base.logger&.warn { "sqlite_search: rerank failed, using fused order (#{e.class}: #{e.message})" }
         fused
       end
     end
