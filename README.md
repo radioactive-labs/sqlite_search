@@ -16,6 +16,19 @@ embeddings via a callback. Hybrid search fuses the two with Reciprocal Rank
 Fusion and an optional reranking step. There are no database triggers and no
 search server to run. Works on Rails 8.0+.
 
+## Used in production
+
+<a href="https://universalchatbot.com">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/universal-chatbot-dark.svg">
+    <img src="docs/assets/universal-chatbot-light.svg" alt="Universal Chatbot" height="33">
+  </picture>
+</a>
+
+sqlite_search runs the knowledge base search in
+[Universal Chatbot](https://universalchatbot.com), where it handles keyword,
+semantic, and hybrid retrieval over customer documents on SQLite in production.
+
 ## 30-second tour
 
 Declare a search index in a migration, add one line to the model, and query it:
