@@ -22,15 +22,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        ruby: ["3.2", "3.3", "3.4"]
         rails: ["8.0", "8.1"]
     env:
       RAILS_VERSION: ${{ matrix.rails }}
-    name: "Rails ${{ matrix.rails }}"
+    name: "Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }}"
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: ${{ matrix.ruby }}
       # Resolve fresh against the matrix RAILS_VERSION rather than the committed lock.
       - run: rm -f Gemfile.lock && bundle install
       - run: bundle exec rake test

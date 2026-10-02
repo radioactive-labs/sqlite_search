@@ -27,8 +27,10 @@ namespace :release do
   end
 
   def gem_published?(version)
+    # Output looks like "sqlite_search (0.2.0, 0.1.0)"; compare whole versions so
+    # 0.1.0 does not match 10.1.0.
     out = `gem list --remote --exact --all #{RELEASE_GEM_NAME} 2>/dev/null`
-    out.include?("#{version},") || out.include?("#{version})") || out.include?(" #{version} ")
+    out[/\((.*)\)/, 1].to_s.split(",").map { |v| v.split.first }.include?(version)
   end
 
   desc "Show the current version"
