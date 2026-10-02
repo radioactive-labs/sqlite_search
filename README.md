@@ -386,6 +386,9 @@ already-fused set; raise `k:` or `limit:` if you need more rows to survive it.
 
 ## Limitations and notes
 
+**Ruby 3.3 or newer.** Vector and hybrid search run on `neighbor` 1.x, which
+requires Ruby 3.3.
+
 **ActiveRecord 8.0 or newer.** The migration helpers and their `schema.rb`
 round-trip rely on `create_virtual_table`, which arrived in Rails 8.0. The gem
 does not run on 7.1 or 7.2, and the gemspec enforces that.

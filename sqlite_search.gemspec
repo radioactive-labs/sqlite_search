@@ -19,7 +19,9 @@ Gem::Specification.new do |spec|
     schema that restores cleanly from schema.rb.
   DESC
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.2"
+  # Ruby 3.3 is the floor: vector and hybrid search run on neighbor 1.x,
+  # which requires Ruby 3.3.
+  spec.required_ruby_version = ">= 3.3"
 
   spec.metadata["allowed_push_host"] = "https://rubygems.org"
   spec.metadata["source_code_uri"] = spec.homepage
