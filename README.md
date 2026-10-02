@@ -102,6 +102,29 @@ changes. They run inside the transaction, so the index write is atomic with the
 row: if it fails, both roll back. A model can declare more than one index
 (`fts5_scope :search_body, against: :body`) and each gets its own scope.
 
+### Index derived text
+
+When the text to index is not a plain column (assembled from JSON, cleaned up,
+or stemmed in Ruby), name a method with `source:`. It returns a hash of FTS
+column to text, and `against:` still names those columns and their weights.
+`watch:` lists the attributes whose change triggers a resync:
+
+```ruby
+class Article < ApplicationRecord
+  fts5_scope :keyword, against: { text: 1.0, tags: 2.0 },
+    source: :search_document, watch: [:body, :metadata]
+
+  def search_document
+    { text: body, tags: metadata["tags"].join(" ") }
+  end
+end
+```
+
+`watch:` defaults to the `against:` columns. `reindex` rebuilds a `source:`
+index record by record in Ruby, inside one transaction. `backfill: true` in the
+migration copies columns straight from the table, so it does not apply here;
+run `reindex` after the migration instead.
+
 ### Query
 
 ```ruby
@@ -212,6 +235,24 @@ vec_scope :semantic_search, against: [:title, :body], dimensions: 768, sync: :in
 ```
 
 Route the job to a specific queue with `SqliteSearch.config.job_queue = :embeddings`.
+
+Pass `sync: :manual` when your app already runs its own embedding pipeline (to
+track progress on the row, say). Saves then never embed, destroys still remove
+the vector, and your code embeds a record when it is ready:
+
+```ruby
+vec_scope :semantic_search, against: :body, dimensions: 768, sync: :manual
+
+post.reembed(:semantic_search)   # embed this record now
+```
+
+To embed text that is not a plain column, name a method with `source:` that
+returns the text, and list the attributes it depends on in `watch:` (not needed
+with `sync: :manual`, which never re-embeds on save):
+
+```ruby
+vec_scope :semantic_search, source: :embedding_text, watch: [:body, :metadata], dimensions: 768
+```
 
 ### Query
 

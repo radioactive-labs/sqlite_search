@@ -20,8 +20,7 @@ module SqliteSearch
           end
           conn.transaction do
             delete_row(conn, id)
-            values = @definition.columns.map { |c| record.public_send(c) }
-            insert_row(conn, id, values) unless values.all? { |v| v.nil? || v.to_s.empty? }
+            insert_record(conn, id, record)
           end
         end
       end
@@ -41,18 +40,16 @@ module SqliteSearch
         end
 
         model.with_connection do |conn|
-          col_list = @definition.columns.map { |c| conn.quote_column_name(c) }.join(", ")
-          non_blank = @definition.columns.map { |c| "COALESCE(#{conn.quote_column_name(c)}, '')" }.join(" || ")
           # One transaction, so readers never see an empty index and a failed
           # insert leaves the old index in place.
           conn.transaction do
             conn.execute("DELETE FROM #{quoted(conn)}")
-            conn.execute(<<~SQL.squish)
-              INSERT INTO #{quoted(conn)} (rowid, #{col_list})
-              SELECT #{conn.quote_column_name(model.primary_key)}, #{col_list}
-              FROM #{conn.quote_table_name(model.table_name)}
-              WHERE (#{non_blank}) <> ''
-            SQL
+            if @definition.source
+              # Derived text only exists in Ruby, so rebuild record by record.
+              model.unscoped.find_each { |record| insert_record(conn, record.public_send(model.primary_key), record) }
+            else
+              copy_columns(conn, model)
+            end
           end
         end
       end
@@ -63,6 +60,22 @@ module SqliteSearch
 
       def delete_row(conn, id)
         conn.execute("DELETE FROM #{quoted(conn)} WHERE rowid = #{conn.quote(id)}")
+      end
+
+      def insert_record(conn, id, record)
+        values = @definition.values_for(record)
+        insert_row(conn, id, values) unless values.all? { |v| v.nil? || v.to_s.empty? }
+      end
+
+      def copy_columns(conn, model)
+        col_list = @definition.columns.map { |c| conn.quote_column_name(c) }.join(", ")
+        non_blank = @definition.columns.map { |c| "COALESCE(#{conn.quote_column_name(c)}, '')" }.join(" || ")
+        conn.execute(<<~SQL.squish)
+          INSERT INTO #{quoted(conn)} (rowid, #{col_list})
+          SELECT #{conn.quote_column_name(model.primary_key)}, #{col_list}
+          FROM #{conn.quote_table_name(model.table_name)}
+          WHERE (#{non_blank}) <> ''
+        SQL
       end
 
       def insert_row(conn, id, values)

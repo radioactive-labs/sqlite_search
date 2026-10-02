@@ -15,8 +15,8 @@ module SqliteSearch
         superclass.sqlite_search_fts5_definitions.merge(own)
       end
 
-      def fts5_scope(name, against:)
-        definition = Fts5::Definition.new(model: self, name: name, against: against)
+      def fts5_scope(name, against:, source: nil, watch: nil)
+        definition = Fts5::Definition.new(model: self, name: name, against: against, source: source, watch: watch)
         (@sqlite_search_fts5_definitions ||= {})[definition.name] = definition
 
         scope name, ->(query = nil, prefix: false, raw: nil) do
@@ -44,7 +44,7 @@ module SqliteSearch
           where("#{pk} IN (SELECT rowid FROM #{fts} WHERE #{fts} MATCH ?)", match).extending(rank_module)
         end
 
-        cols = definition.column_names
+        cols = definition.watch_names
         # FTS5 sync runs inside the transaction (after_save/after_destroy), not
         # after_commit: an FTS5 write is a cheap local write, so keeping it in the
         # transaction makes the index atomic with the row. A failed write rolls
@@ -70,10 +70,19 @@ module SqliteSearch
         superclass.sqlite_search_vec_definitions.merge(own)
       end
 
-      def vec_scope(name, against:, dimensions:, distance: :cosine, embedder: nil, sync: :async)
+      # sync: :async (enqueue EmbedJob on save), :inline (embed in the save
+      # callback), or :manual (never on save; call record.reembed yourself).
+      def vec_scope(name, dimensions:, against: nil, source: nil, watch: nil, distance: :cosine, embedder: nil, sync: :async)
+        unless SqliteSearch::Vec::SYNC_MODES.include?(sync)
+          raise SqliteSearch::Error, "Unsupported sync #{sync.inspect}. Use one of: #{SqliteSearch::Vec::SYNC_MODES.join(", ")}."
+        end
+        if source && watch.nil? && sync != :manual
+          raise SqliteSearch::Error, "vec_scope :#{name} uses source:, so it needs watch: (the attributes that change the text)."
+        end
         SqliteSearch::Vec.load!
         definition = SqliteSearch::Vec::Definition.new(
-          model: self, name: name, against: against, dimensions: dimensions, distance: distance, embedder: embedder
+          model: self, name: name, against: against, source: source, watch: watch,
+          dimensions: dimensions, distance: distance, embedder: embedder
         )
         (@sqlite_search_vec_definitions ||= {})[definition.name] = definition
 
@@ -119,16 +128,17 @@ module SqliteSearch
           where(primary_key => ids).reorder(order).select(cols.join(", ")).extending(SqliteSearch::ScoredRelation)
         end
 
-        vec_cols = definition.column_names
+        vec_cols = definition.watch_names
         vec_sync = sync
-        SqliteSearch.ensure_embed_job! unless vec_sync == :inline
-        after_save_commit do
-          if (saved_changes.keys & vec_cols).any?
-            backend = SqliteSearch::Vec::Backend.new(definition)
-            if vec_sync == :inline
-              backend.embed_and_store(self)
-            else
-              SqliteSearch::EmbedJob.perform_later(self.class.name, public_send(self.class.primary_key), definition.name.to_s)
+        SqliteSearch.ensure_embed_job! if vec_sync == :async
+        unless vec_sync == :manual
+          after_save_commit do
+            if (saved_changes.keys & vec_cols).any?
+              if vec_sync == :inline
+                SqliteSearch::Vec::Backend.new(definition).embed_and_store(self)
+              else
+                SqliteSearch::EmbedJob.perform_later(self.class.name, public_send(self.class.primary_key), definition.name.to_s)
+              end
             end
           end
         end
@@ -195,6 +205,14 @@ module SqliteSearch
             .extending(SqliteSearch::ScoredRelation)
         end
       end
+    end
+
+    # Embed this record into one vec index (or every one) now. This is how a
+    # sync: :manual scope is kept current, typically from the app's own job.
+    def reembed(name = nil)
+      definitions = self.class.sqlite_search_vec_definitions
+      selected = name ? [definitions.fetch(name.to_sym)] : definitions.values
+      selected.each { |definition| SqliteSearch::Vec::Backend.new(definition).embed_and_store(self) }
     end
   end
 end

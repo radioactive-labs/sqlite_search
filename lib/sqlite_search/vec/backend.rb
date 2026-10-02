@@ -16,8 +16,8 @@ module SqliteSearch
         end
 
         model = @definition.neighbor_model
-        text = SqliteSearch::Vec.text_for(record, @definition.columns)
-        if text.empty?
+        text = @definition.text_for(record)
+        if text.strip.empty?
           model.where(id: id).delete_all
           return
         end

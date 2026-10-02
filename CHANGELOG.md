@@ -22,5 +22,9 @@ All notable changes to this project are documented here. The format is based on
 - Exact pre-filtering by chaining: conditions placed before `.search`/`.semantic`
   (for example `Post.where(tenant_id: 5).search("...")`) push into both arms.
 - Rails generators for the FTS5 and vec migrations.
+- Derived text: `source:` and `watch:` on `fts5_scope` and `vec_scope` index text
+  computed in Ruby and resync when the watched attributes change.
+- `vec_scope ..., sync: :manual` with `record.reembed` for apps that run their own
+  embedding pipeline.
 
 [Unreleased]: https://github.com/radioactive-labs/sqlite_search/commits/main
