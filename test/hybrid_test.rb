@@ -93,4 +93,16 @@ class HybridTest < SqliteSearch::TestCase
     assert_equal @klass.search("coffee", rerank: false).pluck(:id),
       @klass.order(id: :desc).search("coffee", rerank: false).pluck(:id)
   end
+
+  def test_vec_threshold_drops_weak_semantic_matches
+    # "green tea" has no keyword match and a weak semantic one for "coffee",
+    # so a strict vector threshold removes it from the fused set.
+    assert_includes @klass.search("coffee", rerank: false).pluck(:id), 2
+    refute_includes @klass.search("coffee", rerank: false, vec_threshold: 0.9).pluck(:id), 2
+  end
+
+  def test_fts5_threshold_drops_weak_keyword_matches
+    ids = @klass.search("coffee", rerank: false, fts5_threshold: 1_000.0, vec_threshold: 2.0).pluck(:id)
+    assert_empty ids
+  end
 end

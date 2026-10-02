@@ -59,4 +59,16 @@ class RankTest < SqliteSearch::TestCase
     end
     assert_equal [2, 1], klass.full("coffee").order_by_rank.pluck(:id)
   end
+
+  def test_threshold_keeps_only_strong_matches
+    ranks = @klass.full("coffee").order_by_rank.map(&:full_rank)
+    cut = ranks.sum / 2
+    kept = @klass.full("coffee").order_by_rank(threshold: cut).map(&:full_rank)
+    assert_equal ranks.select { |r| r >= cut }, kept
+    refute_equal ranks.size, kept.size
+  end
+
+  def test_threshold_is_safe_on_blank
+    assert_equal [], @klass.full("").order_by_rank(threshold: 1.0).to_a
+  end
 end

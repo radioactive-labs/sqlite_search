@@ -26,5 +26,7 @@ All notable changes to this project are documented here. The format is based on
   computed in Ruby and resync when the watched attributes change.
 - `vec_scope ..., sync: :manual` with `record.reembed` for apps that run their own
   embedding pipeline.
+- Relevance thresholds: `order_by_rank(threshold:)`, and per-arm
+  `fts5_threshold:` / `vec_threshold:` on hybrid scopes.
 
 [Unreleased]: https://github.com/radioactive-labs/sqlite_search/commits/main

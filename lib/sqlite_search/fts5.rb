@@ -20,7 +20,7 @@ module SqliteSearch
     # Extended onto the .none relation returned for blank queries so that
     # .order_by_rank chains safely (returns the same empty relation).
     module NullRank
-      def order_by_rank = self
+      def order_by_rank(threshold: nil) = self
     end
   end
 end

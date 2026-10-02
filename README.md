@@ -153,7 +153,9 @@ posts.first.search_rank   # higher is more relevant
 
 `order_by_rank` orders by SQLite's `bm25()`, inverted so higher means better, and
 honors the per-column weights from `against:`. It replaces any `order` chained
-before it; chain an `order` after it to add a tiebreaker. Each ranked record carries a
+before it; chain an `order` after it to add a tiebreaker.
+`order_by_rank(threshold: 8.0)` keeps only rows whose rank is at least the
+threshold. Each ranked record carries a
 `<name>_rank` reader (`search_rank` for a scope named `:search`).
 
 ### Reindexing
@@ -313,6 +315,15 @@ as a relation in fused order (replacing any `order` chained before the search), 
 defaults to 20. A blank query returns `.none`. Pass `rerank: false` to skip the
 reranker and return the plain fused order.
 
+Each arm can drop weak matches before fusion, so a poor match from one arm is
+not lifted into the results by the other. `fts5_threshold:` is a minimum
+keyword rank, and `vec_threshold:` is the vector scope's `threshold:` (minimum
+similarity on a cosine scope):
+
+```ruby
+Post.search("coffee", fts5_threshold: 8.0, vec_threshold: 0.3)
+```
+
 ### Reranking
 
 Register a reranker once and every hybrid scope uses it, unless a call opts out:
@@ -413,11 +424,6 @@ embedding call and the queries the moment you call them rather than building a
 lazy relation. `.search` does the most work, re-running both arms, the fusion,
 and any reranker (possibly a network call) on every invocation, so do not call
 either one inside a loop.
-
-**Hybrid's vector arm has no relevance threshold.** A bare `.semantic_search` call takes
-`threshold:`, but `hybrid_scope` does not, so the vector arm always feeds its
-nearest neighbors into the fusion even for a weak semantic match. Per-arm
-thresholds may come later.
 
 **The candidate pool is capped.** A hybrid scope pulls `[limit * 3, 100].min`
 candidates from each arm before fusing, so a very large `limit:` still fuses from

@@ -31,10 +31,11 @@ module SqliteSearch
           # order_by_rank joins the fts table and re-applies MATCH here. It
           # reorders: relevance replaces any order chained before the search.
           rank_module = Module.new do
-            define_method(:order_by_rank) do
+            define_method(:order_by_rank) do |threshold: nil|
               bm25 = with_connection { |conn| definition.bm25_expression(conn) }
-              joins("JOIN #{fts} ON #{fts}.rowid = #{pk}")
-                .where("#{fts} MATCH ?", match)
+              ranked = joins("JOIN #{fts} ON #{fts}.rowid = #{pk}").where("#{fts} MATCH ?", match)
+              ranked = ranked.where("-#{bm25} >= ?", threshold) if threshold
+              ranked
                 .select("#{quoted_table_name}.*, -#{bm25} AS #{definition.rank_column}")
                 .reorder(Arel.sql(bm25))
                 .extending(SqliteSearch::ScoredRelation)
@@ -174,13 +175,13 @@ module SqliteSearch
         rrf_k = k
         score_method = "#{name}_score"
 
-        scope name, ->(query = nil, limit: 20, rerank: true) do
+        scope name, ->(query = nil, limit: 20, rerank: true, fts5_threshold: nil, vec_threshold: nil) do
           next none if query.nil? || query.to_s.strip.empty?
           # candidate pool per arm before fusion; capped so a large limit: can't over-fetch
           pool = [limit * 3, 100].min
 
-          fts_ids = all.public_send(fts5_name, query).order_by_rank.limit(pool).pluck(primary_key)
-          vec_ids = all.public_send(vec_name, query, k: pool).pluck(primary_key)
+          fts_ids = all.public_send(fts5_name, query).order_by_rank(threshold: fts5_threshold).limit(pool).pluck(primary_key)
+          vec_ids = all.public_send(vec_name, query, k: pool, threshold: vec_threshold).pluck(primary_key)
 
           fused = SqliteSearch::Hybrid.rrf(fts_ids, vec_ids, k: rrf_k)
           next none if fused.empty?
