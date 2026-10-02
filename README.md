@@ -14,7 +14,7 @@ module with BM25 relevance ranking. Vector (semantic) search uses
 [`neighbor`](https://github.com/ankane/neighbor) gem, with your app supplying
 embeddings via a callback. Hybrid search fuses the two with Reciprocal Rank
 Fusion and an optional reranking step. There are no database triggers and no
-background service to run. Works on Rails 8.0+.
+search server to run. Works on Rails 8.0+.
 
 ## 30-second tour
 
@@ -30,7 +30,6 @@ end
 
 # app/models/post.rb
 class Post < ApplicationRecord
-  include SqliteSearch::Model
   fts5_scope :search, against: { title: 2.0, body: 1.0 }
 end
 
@@ -52,9 +51,11 @@ Add the gem:
 gem "sqlite_search"
 ```
 
-Then `bundle install`. In a Rails app the model concern and the migration
-helpers are wired in automatically. Vector and hybrid search need two more gems;
-see [Vector search](#vector-search).
+Then `bundle install`. In a Rails app the model DSL (`fts5_scope`, `vec_scope`,
+`hybrid_scope`) and the migration helpers are available in every model and
+migration automatically. Outside Rails, `include SqliteSearch::Model` in your
+models and `ActiveRecord::Migration.include(SqliteSearch::Migration)`. Vector
+and hybrid search need two more gems; see [Vector search](#vector-search).
 
 ## Full-text search
 
@@ -91,7 +92,6 @@ database.
 
 ```ruby
 class Post < ApplicationRecord
-  include SqliteSearch::Model
   fts5_scope :search, against: { title: 2.0, body: 1.0 }
 end
 ```
@@ -129,7 +129,8 @@ posts.first.search_rank   # higher is more relevant
 ```
 
 `order_by_rank` orders by SQLite's `bm25()`, inverted so higher means better, and
-honors the per-column weights from `against:`. Each ranked record carries a
+honors the per-column weights from `against:`. It replaces any `order` chained
+before it; chain an `order` after it to add a tiebreaker. Each ranked record carries a
 `<name>_rank` reader (`search_rank` for a scope named `:search`).
 
 ### Reindexing
@@ -156,6 +157,17 @@ dependency of sqlite_search itself:
 gem "neighbor"
 gem "sqlite-vec"
 ```
+
+Then have `neighbor` load the sqlite-vec extension on every connection:
+
+```
+rails g neighbor:sqlite
+```
+
+That writes `config/initializers/neighbor.rb`, which calls
+`Neighbor::SQLite.initialize!`. Do this before running a `create_vec_index`
+migration: without it, migrations and `db:schema:load` (which do not load your
+models) fail with `no such module: vec0`.
 
 ### Register an embedder
 
@@ -214,6 +226,9 @@ is closer). `threshold:` filters by relevance: on a cosine scope it is a minimum
 similarity, on a euclidean or taxicab scope it is a maximum distance. A blank or
 nil query returns `.none`.
 
+Results come back nearest first, replacing any `order` chained before the
+search.
+
 Re-embed after a bulk write the same way you reindex FTS5:
 
 ```ruby
@@ -222,6 +237,9 @@ Post.reembed                     # every vec_scope on the model
 ```
 
 or `rake sqlite_search:reembed[Post,semantic_search]` from the command line.
+Re-embedding overwrites vectors row by row, so the index stays searchable while
+it runs and an embedder failure partway leaves the remaining rows' vectors in
+place. It then drops vectors whose row no longer exists.
 
 ## Hybrid search
 
@@ -232,8 +250,6 @@ declared:
 
 ```ruby
 class Post < ApplicationRecord
-  include SqliteSearch::Model
-
   fts5_scope :search_body, against: :body
   vec_scope :semantic_search, against: :body, dimensions: 768, sync: :inline
   hybrid_scope :search, fts5: :search_body, vec: :semantic_search
@@ -252,7 +268,7 @@ posts.first.search_score   # fused score, higher is better
 
 Each arm produces a ranked candidate list, Reciprocal Rank Fusion combines them,
 an optional reranker reorders the result, and the top `limit` records come back
-as a relation ordered to match, each carrying a `<name>_score` reader. `limit:`
+as a relation in fused order (replacing any `order` chained before the search), each carrying a `<name>_score` reader. `limit:`
 defaults to 20. A blank query returns `.none`. Pass `rerank: false` to skip the
 reranker and return the plain fused order.
 

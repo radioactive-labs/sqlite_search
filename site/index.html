@@ -160,7 +160,6 @@ end
 
 <span class="cmt"># app/models/post.rb</span>
 class Post &lt; ApplicationRecord
-  include SqliteSearch::Model
   fts5_scope :search, against: { title: 2.0, body: 1.0 }
 end
 
@@ -176,7 +175,7 @@ Post.where(author_id: 7).search("coffee")        <span class="cmt"># searches on
       <li><b>Vector (semantic).</b> <a href="https://github.com/asg017/sqlite-vec">sqlite-vec</a> through the <a href="https://github.com/ankane/neighbor">neighbor</a> gem, with your app supplying embeddings via a callback. Ranks rows by similarity instead of keywords.</li>
       <li><b>Hybrid.</b> Runs a keyword search and a vector search together and fuses the rankings with Reciprocal Rank Fusion, catching both exact-term matches and semantic ones, with an optional reranking step.</li>
     </ul>
-    <p class="sub">There are no database triggers and no background service to run. The virtual tables round-trip through <code>schema.rb</code> like any other table.</p>
+    <p class="sub">There are no database triggers and no search server to run. The virtual tables round-trip through <code>schema.rb</code> like any other table.</p>
 
     <h2>Documentation</h2>
     <ul class="links">
