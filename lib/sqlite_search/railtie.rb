@@ -15,6 +15,13 @@ module SqliteSearch
       end
     end
 
+    # Define EmbedJob as soon as ActiveJob loads, not when the first model with
+    # a vec_scope loads: a worker process deserializes the job by class name,
+    # possibly before any model has been loaded.
+    initializer "sqlite_search.active_job" do
+      ActiveSupport.on_load(:active_job) { SqliteSearch.ensure_embed_job! }
+    end
+
     rake_tasks do
       load File.expand_path("../tasks/sqlite_search.rake", __dir__)
     end

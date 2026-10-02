@@ -38,7 +38,10 @@ module SqliteSearch
         @neighbor_model ||= begin
           tbl = table_name
           dims = dimensions
-          Class.new(ActiveRecord::Base) do
+          # Subclass the model's abstract parent (ApplicationRecord, or the
+          # abstract class of a secondary database) so the vec table is read
+          # and written on the model's own database.
+          Class.new(model.base_class.superclass) do
             self.table_name = tbl
             self.primary_key = "id"
             has_neighbors :embedding, dimensions: dims
