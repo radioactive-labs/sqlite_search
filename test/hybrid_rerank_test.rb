@@ -80,4 +80,32 @@ class HybridRerankTest < SqliteSearch::TestCase
     ids = @klass.search("coffee").to_a.map(&:id)
     refute_includes ids, 99
   end
+
+  def test_scored_reranker_sets_the_score
+    SqliteSearch.reranker { |_q, docs, **| docs.map { |d| [d, d.id * 0.25] }.reverse }
+    rows = @klass.search("coffee").to_a
+    assert_equal [2, 1], rows.map(&:id)
+    assert_equal [0.5, 0.25], rows.map(&:search_score)
+  end
+
+  def test_scored_reranker_order_wins_over_its_scores
+    # The returned order is the result order, even if the scores disagree.
+    SqliteSearch.reranker { |_q, docs, **| docs.sort_by(&:id).map { |d| [d, d.id.to_f] } }
+    assert_equal [1, 2], @klass.search("coffee").pluck(:id)
+  end
+
+  def test_unscored_reranker_keeps_the_fused_score
+    fused = @klass.search("coffee", rerank: false).to_a.to_h { |r| [r.id, r.search_score] }
+    SqliteSearch.reranker { |_q, docs, **| docs.reverse }
+    @klass.search("coffee").each { |r| assert_equal fused[r.id], r.search_score }
+  end
+
+  def test_scored_reranker_cannot_inject_records
+    # Same setup as the unscored case above: drop its vector so it is a real
+    # non-candidate rather than a padded KNN neighbor.
+    other = @klass.create!(id: 3, body: "unrelated")
+    @conn.execute("DELETE FROM posts_semantic_vec WHERE id = 3")
+    SqliteSearch.reranker { |_q, docs, **| docs.map { |d| [d, 1.0] } + [[other, 9.0]] }
+    refute_includes @klass.search("coffee").pluck(:id), 3
+  end
 end

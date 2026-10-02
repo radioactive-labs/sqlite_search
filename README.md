@@ -319,7 +319,7 @@ hybrid name collides with an arm's name). `k:` sets the RRF constant (default
 
 ```ruby
 posts = Post.search("coffee", limit: 20)
-posts.first.search_score   # fused score, higher is better
+posts.first.search_score   # fused (or reranker) score, higher is better
 ```
 
 Each arm produces a ranked candidate list, Reciprocal Rank Fusion combines them,
@@ -343,13 +343,27 @@ Register a reranker once and every hybrid scope uses it, unless a call opts out:
 
 ```ruby
 SqliteSearch.reranker do |query, documents, model:, scope:|
-  # documents are the fused candidate records, already loaded, in RRF order.
-  # Return them reordered; a subset is fine, unknown records are ignored.
-  MyRerankClient.rerank(query, documents)
+  # One relevance score per text, from your cross-encoder or rerank API.
+  scores = MyRerankClient.score(query, documents.map(&:body))
+  documents.zip(scores).sort_by { |_doc, score| -score }
 end
 ```
 
-`model:` is the model class the scope was declared on, and `scope:` is the hybrid
+`documents` is an `Array` of loaded records of the searched model, the same
+objects `Post.find` returns, in fused (RRF) order. It holds every fused
+candidate, before the `limit:` cut: each arm contributes up to
+`[limit * 3, 100].min`, so at most 200 records. You choose which attributes to
+send to your reranker (`body` above, or the text you embed).
+
+Return `[record, score]` pairs in the order you want, as above, and each
+record's `<name>_score` becomes your reranker's score. You can also return just
+the records, reordered, and `<name>_score` keeps the fused RRF score. Either way
+the order you return is the result order. Records are matched back by primary
+key: a candidate you leave out is dropped from the results, a record that was
+not a candidate is ignored, and an empty array gives `.none`. The top `limit`
+of your order comes back.
+
+`model:` is the class the search was called on, and `scope:` is the hybrid
 scope name (the same pair is passed to the embedder block). Reranking is
 best-effort: if the block raises, the failure is logged and the search falls back
 to the fused order, so a broken reranker never takes down a search.

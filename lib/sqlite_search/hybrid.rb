@@ -14,8 +14,9 @@ module SqliteSearch
     end
 
     # Best-effort rerank. `fused` is [[id, score], ...]; returns the same shape
-    # reordered by the reranker (RRF scores preserved), or the input unchanged
-    # on any reranker failure.
+    # in the reranker's order, or the input unchanged on any reranker failure.
+    # The reranker returns records, or [record, score] pairs to replace each
+    # record's RRF score with its own. Records outside `fused` are dropped.
     def rerank(query, fused, model:, scope_name:, reranker:)
       return fused unless reranker
       ids = fused.map(&:first)
@@ -24,9 +25,10 @@ module SqliteSearch
       scores = fused.to_h
       begin
         reordered = reranker.call(query, records, model: model, scope: scope_name)
-        reordered.filter_map do |rec|
+        reordered.filter_map do |entry|
+          rec, rerank_score = entry.is_a?(Array) ? entry : [entry, nil]
           id = rec.public_send(model.primary_key)
-          [id, scores[id]] if scores.key?(id)
+          [id, rerank_score || scores[id]] if scores.key?(id)
         end
       rescue => e
         ActiveRecord::Base.logger&.warn { "sqlite_search: rerank failed, using fused order (#{e.class}: #{e.message})" }

@@ -28,5 +28,7 @@ All notable changes to this project are documented here. The format is based on
   embedding pipeline.
 - Relevance thresholds: `order_by_rank(threshold:)`, and per-arm
   `fts5_threshold:` / `vec_threshold:` on hybrid scopes.
+- A reranker can return `[record, score]` pairs, which set each result's
+  `<name>_score` to the reranker's score.
 
 [Unreleased]: https://github.com/radioactive-labs/sqlite_search/commits/main
