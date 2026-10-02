@@ -39,4 +39,16 @@ class RankTest < SqliteSearch::TestCase
   def test_order_by_rank_safe_on_blank
     assert_equal [], @klass.full("").order_by_rank.to_a
   end
+
+  def test_weights_follow_table_column_order_not_hash_order
+    # The FTS table is (title, body); declaring the hash body-first must still
+    # weight title 2.0, since bm25() applies weights by table column position.
+    klass = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+      include SqliteSearch::Model
+
+      fts5_scope :full, against: {body: 1.0, title: 2.0}
+    end
+    assert_equal [2, 1], klass.full("coffee").order_by_rank.pluck(:id)
+  end
 end

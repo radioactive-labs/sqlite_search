@@ -15,8 +15,8 @@ module SqliteSearch
         superclass.sqlite_search_fts5_definitions.merge(own)
       end
 
-      def fts5_scope(name, against:, tokenizer: "porter unicode61")
-        definition = Fts5::Definition.new(model: self, name: name, against: against, tokenizer: tokenizer)
+      def fts5_scope(name, against:)
+        definition = Fts5::Definition.new(model: self, name: name, against: against)
         (@sqlite_search_fts5_definitions ||= {})[definition.name] = definition
 
         scope name, ->(query = nil, prefix: false, raw: nil) do
