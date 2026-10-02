@@ -56,4 +56,12 @@ class VecQueryTest < SqliteSearch::TestCase
     assert_respond_to top, :semantic_similarity
     assert_operator top.semantic_similarity, :>, 0.5
   end
+
+  def test_count_works
+    assert_equal 2, @klass.semantic("coffee").count
+  end
+
+  def test_nearest_order_overrides_a_preceding_order
+    assert_equal [2, 1], @klass.order(:id).semantic("tea").pluck(:id)
+  end
 end

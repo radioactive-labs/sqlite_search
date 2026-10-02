@@ -82,4 +82,15 @@ class HybridTest < SqliteSearch::TestCase
       end
     end
   end
+
+  def test_count_works
+    assert_equal @klass.search("coffee").to_a.size, @klass.search("coffee").count
+  end
+
+  def test_fused_order_overrides_a_preceding_order
+    scores = @klass.order(id: :desc).search("coffee", rerank: false).map(&:search_score)
+    assert_equal scores.sort.reverse, scores
+    assert_equal @klass.search("coffee", rerank: false).pluck(:id),
+      @klass.order(id: :desc).search("coffee", rerank: false).pluck(:id)
+  end
 end

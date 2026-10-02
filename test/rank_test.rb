@@ -40,6 +40,14 @@ class RankTest < SqliteSearch::TestCase
     assert_equal [], @klass.full("").order_by_rank.to_a
   end
 
+  def test_count_works_on_ranked_relation
+    assert_equal 2, @klass.full("coffee").order_by_rank.count
+  end
+
+  def test_rank_overrides_a_preceding_order
+    assert_equal [2, 1], @klass.order(:id).full("coffee").order_by_rank.pluck(:id)
+  end
+
   def test_weights_follow_table_column_order_not_hash_order
     # The FTS table is (title, body); declaring the hash body-first must still
     # weight title 2.0, since bm25() applies weights by table column position.

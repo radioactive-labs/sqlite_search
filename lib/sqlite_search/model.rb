@@ -23,18 +23,21 @@ module SqliteSearch
           match = raw || SqliteSearch::Query.build(query, prefix: prefix)
           next none.extending(SqliteSearch::Fts5::NullRank) if match.nil? || match.to_s.empty?
 
-          fts = connection.quote_table_name(definition.table_name)
-          pk = "#{connection.quote_table_name(table_name)}.#{connection.quote_column_name(primary_key)}"
+          fts, pk = with_connection do |conn|
+            [conn.quote_table_name(definition.table_name), "#{quoted_table_name}.#{conn.quote_column_name(primary_key)}"]
+          end
 
           # bm25() is only valid in a query that MATCHes the fts table, so
-          # order_by_rank joins the fts table and re-applies MATCH here.
+          # order_by_rank joins the fts table and re-applies MATCH here. It
+          # reorders: relevance replaces any order chained before the search.
           rank_module = Module.new do
             define_method(:order_by_rank) do
-              bm25 = definition.bm25_expression(connection)
+              bm25 = with_connection { |conn| definition.bm25_expression(conn) }
               joins("JOIN #{fts} ON #{fts}.rowid = #{pk}")
                 .where("#{fts} MATCH ?", match)
-                .select("#{connection.quote_table_name(table_name)}.*, -#{bm25} AS #{definition.rank_column}")
-                .order(Arel.sql(bm25))
+                .select("#{quoted_table_name}.*, -#{bm25} AS #{definition.rank_column}")
+                .reorder(Arel.sql(bm25))
+                .extending(SqliteSearch::ScoredRelation)
             end
           end
 
@@ -80,9 +83,10 @@ module SqliteSearch
           vector = definition.embed(query.to_s, record_model: klass)
 
           caller_conditions = all.only(:where, :joins)
-          src = connection.quote_table_name(table_name)
-          vec = connection.quote_table_name(definition.table_name)
-          pkc = connection.quote_column_name(primary_key)
+          src = quoted_table_name
+          vec, pkc = with_connection do |conn|
+            [conn.quote_table_name(definition.table_name), conn.quote_column_name(primary_key)]
+          end
 
           knn = definition.neighbor_model
             .joins("JOIN #{src} ON #{src}.#{pkc} = #{vec}.id")
@@ -101,15 +105,18 @@ module SqliteSearch
 
           ids = hits.map(&:first)
           distances = hits.to_h
-          pk_sql = "#{quoted_table_name}.#{pkc}"
+          pk_sql = "#{src}.#{pkc}"
           # Order and per-row scores are computed in Ruby (from the KNN), so carry
           # them as selected CASE columns: <name>_distance is then a real attribute.
-          order = Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, connection))
-          cols = ["#{quoted_table_name}.*", "#{SqliteSearch::Sql.id_case(pk_sql, distances, connection)} AS #{definition.distance_method}"]
-          if definition.cosine?
-            cols << "#{SqliteSearch::Sql.id_case(pk_sql, distances.transform_values { |d| 1.0 - d }, connection)} AS #{definition.similarity_method}"
+          # Nearness replaces any order chained before the search.
+          order, cols = with_connection do |conn|
+            cols = ["#{src}.*", "#{SqliteSearch::Sql.id_case(pk_sql, distances, conn)} AS #{definition.distance_method}"]
+            if definition.cosine?
+              cols << "#{SqliteSearch::Sql.id_case(pk_sql, distances.transform_values { |d| 1.0 - d }, conn)} AS #{definition.similarity_method}"
+            end
+            [Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, conn)), cols]
           end
-          where(primary_key => ids).order(order).select(cols.join(", "))
+          where(primary_key => ids).reorder(order).select(cols.join(", ")).extending(SqliteSearch::ScoredRelation)
         end
 
         vec_cols = definition.column_names
@@ -174,12 +181,18 @@ module SqliteSearch
           fused = fused.first(limit)
           ids = fused.map(&:first)
           scores = fused.to_h
-          pk_sql = "#{quoted_table_name}.#{connection.quote_column_name(primary_key)}"
           # Fused rank and score come from Ruby, so carry them as SQL: the score
           # becomes a real <name>_score attribute (works with pluck, first, etc.).
-          order = Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, connection))
-          score_col = "#{SqliteSearch::Sql.id_case(pk_sql, scores, connection)} AS #{score_method}"
-          where(primary_key => ids).order(order).select("#{quoted_table_name}.*, #{score_col}")
+          # The fused order replaces any order chained before the search.
+          order, score_col = with_connection do |conn|
+            pk_sql = "#{quoted_table_name}.#{conn.quote_column_name(primary_key)}"
+            [
+              Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, conn)),
+              "#{SqliteSearch::Sql.id_case(pk_sql, scores, conn)} AS #{score_method}"
+            ]
+          end
+          where(primary_key => ids).reorder(order).select("#{quoted_table_name}.*, #{score_col}")
+            .extending(SqliteSearch::ScoredRelation)
         end
       end
     end
