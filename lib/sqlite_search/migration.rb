@@ -16,7 +16,9 @@ module SqliteSearch
       options << "tokenize = '#{tokenizer}'"
       connection.create_virtual_table(fts_table, :fts5, options)
 
-      backfill_fts5_index(table, fts_table, columns, primary_key) if backfill
+      return unless backfill
+      # Seeding only applies going up; dropping the table undoes it.
+      reversible { |dir| dir.up { backfill_fts5_index(table, fts_table, columns, primary_key) } }
     end
 
     # vec0 indexes are keyed by an integer `id` column holding the source row's

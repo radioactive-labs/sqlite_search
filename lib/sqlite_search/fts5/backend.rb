@@ -41,15 +41,19 @@ module SqliteSearch
         end
 
         model.with_connection do |conn|
-          conn.execute("DELETE FROM #{quoted(conn)}")
           col_list = @definition.columns.map { |c| conn.quote_column_name(c) }.join(", ")
           non_blank = @definition.columns.map { |c| "COALESCE(#{conn.quote_column_name(c)}, '')" }.join(" || ")
-          conn.execute(<<~SQL.squish)
-            INSERT INTO #{quoted(conn)} (rowid, #{col_list})
-            SELECT #{conn.quote_column_name(model.primary_key)}, #{col_list}
-            FROM #{conn.quote_table_name(model.table_name)}
-            WHERE (#{non_blank}) <> ''
-          SQL
+          # One transaction, so readers never see an empty index and a failed
+          # insert leaves the old index in place.
+          conn.transaction do
+            conn.execute("DELETE FROM #{quoted(conn)}")
+            conn.execute(<<~SQL.squish)
+              INSERT INTO #{quoted(conn)} (rowid, #{col_list})
+              SELECT #{conn.quote_column_name(model.primary_key)}, #{col_list}
+              FROM #{conn.quote_table_name(model.table_name)}
+              WHERE (#{non_blank}) <> ''
+            SQL
+          end
         end
       end
 

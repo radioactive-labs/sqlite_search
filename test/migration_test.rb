@@ -4,11 +4,9 @@ require "test_helper"
 require "stringio"
 
 class MigrationTest < SqliteSearch::TestCase
-  # Minimal object exposing the connection so we can call the helper directly.
-  class Runner
+  # A bare migration so the helper can be called directly.
+  class Runner < ActiveRecord::Migration[8.0]
     include SqliteSearch::Migration
-
-    def connection = ActiveRecord::Base.connection
   end
 
   def setup
@@ -43,5 +41,19 @@ class MigrationTest < SqliteSearch::TestCase
     ActiveRecord::SchemaDumper.dump(@conn.pool, io)
     dump = io.string
     assert_match(/create_virtual_table "posts_full_fts", "fts5"/, dump)
+  end
+
+  def test_backfilled_index_rolls_back
+    migration = Class.new(ActiveRecord::Migration[8.0]) do
+      include SqliteSearch::Migration
+
+      def change
+        create_fts5_index :posts, :by_body, against: :body, backfill: true
+      end
+    end
+    migration.verbose = false
+    migration.migrate(:up)
+    migration.migrate(:down)
+    assert_raises(ActiveRecord::StatementInvalid) { @conn.select_value("SELECT count(*) FROM posts_by_body_fts") }
   end
 end

@@ -34,4 +34,41 @@ class VecReembedTest < SqliteSearch::TestCase
     @klass.reembed
     assert_equal 1, vec_count
   end
+
+  def test_failed_reembed_keeps_existing_vectors
+    @klass.create!(id: 1, body: "coffee")
+    @klass.create!(id: 2, body: "tea")
+    failing = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+      include SqliteSearch::Model
+
+      vec_scope :semantic, against: :body, dimensions: 3, sync: :inline,
+        embedder: ->(text, **) {
+          raise "embedder down" if text == "tea"
+          [1.0, 0.0, 0.0]
+        }
+    end
+    assert_raises(RuntimeError) { failing.reembed }
+    assert_equal 2, vec_count
+  end
+
+  def test_reembed_removes_vectors_for_deleted_rows
+    @klass.create!(id: 1, body: "coffee")
+    @klass.where(id: 1).delete_all # skips the destroy callback
+    @klass.reembed
+    assert_equal 0, vec_count
+  end
+
+  def test_reembed_ignores_default_scope
+    scoped = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+      include SqliteSearch::Model
+
+      default_scope { where.not(body: "tea") }
+      vec_scope :semantic, against: :body, dimensions: 3, sync: :inline
+    end
+    scoped.insert_all([{id: 1, body: "coffee"}, {id: 2, body: "tea"}])
+    scoped.reembed
+    assert_equal 2, vec_count
+  end
 end

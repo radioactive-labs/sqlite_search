@@ -54,4 +54,18 @@ class ReindexTest < SqliteSearch::TestCase
     conn = ActiveRecord::Base.connection
     %w[docs_by_body_fts docs].each { |t| conn.execute("DROP TABLE IF EXISTS #{conn.quote_table_name(t)}") }
   end
+
+  def test_failed_reindex_leaves_the_existing_index_intact
+    @conn.add_column(:posts, :title, :string)
+    @klass.create!(id: 1, body: "coffee")
+    # :title has no column in the FTS table, so the rebuild INSERT fails.
+    broken = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+      include SqliteSearch::Model
+
+      fts5_scope :by_body, against: [:body, :title]
+    end
+    assert_raises(ActiveRecord::StatementInvalid) { broken.reindex }
+    assert_equal [1], @klass.by_body("coffee").pluck(:id)
+  end
 end

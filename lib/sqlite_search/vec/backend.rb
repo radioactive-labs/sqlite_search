@@ -34,9 +34,13 @@ module SqliteSearch
         @definition.neighbor_model.where(id: id).delete_all
       end
 
+      # Re-embeds in place, row by row, so the index stays searchable throughout
+      # and a failed embed leaves the remaining rows' vectors untouched. Then
+      # drops vectors whose source row is gone. Default scopes are ignored, as
+      # the FTS5 rebuild ignores them.
       def reembed(model)
-        @definition.neighbor_model.delete_all
-        model.find_each { |record| embed_and_store(record) }
+        model.unscoped.find_each { |record| embed_and_store(record) }
+        @definition.neighbor_model.where.not(id: model.base_class.unscoped.select(model.primary_key)).delete_all
       end
     end
   end
