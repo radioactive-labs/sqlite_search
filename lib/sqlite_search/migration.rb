@@ -35,14 +35,14 @@ module SqliteSearch
     private
 
     def backfill_fts5_index(table, fts_table, columns, primary_key)
-      col_list = columns.map { |c| connection.quote_column_name(c) }.join(", ")
-      non_blank = columns.map { |c| "COALESCE(#{connection.quote_column_name(c)}, '')" }.join(" || ")
-      connection.execute(<<~SQL.squish)
-        INSERT INTO #{connection.quote_table_name(fts_table)} (rowid, #{col_list})
-        SELECT #{connection.quote_column_name(primary_key)}, #{col_list}
-        FROM #{connection.quote_table_name(table)}
-        WHERE (#{non_blank}) <> ''
-      SQL
+      missing = columns.map(&:to_s) - connection.columns(table).map(&:name)
+      if missing.any?
+        raise SqliteSearch::Error,
+          "create_fts5_index backfill: copies columns straight from #{table}, which has no #{missing.join(", ")}. " \
+          "For an index built with source:, drop backfill: and run Model.reindex after migrating."
+      end
+      connection.execute(SqliteSearch::Fts5.copy_sql(connection, fts_table: fts_table, source_table: table,
+        primary_key: primary_key, columns: columns))
     end
   end
 end

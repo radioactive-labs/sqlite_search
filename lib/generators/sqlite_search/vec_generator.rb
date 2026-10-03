@@ -14,15 +14,14 @@ module SqliteSearch
       class_option :dimensions, type: :numeric, required: true, desc: "Embedding dimensions (e.g. 768)"
 
       def create_migration_file
-        migration_template "create_vec_index.rb.tt", "db/migrate/create_#{index_name}_vec.rb"
+        migration_template "create_vec_index.rb.tt", "db/migrate/create_#{table_name}_#{index_name}_vec.rb"
       end
 
       private
 
-      def table_name = name.tableize
       def index_name = options[:index]
       def dimensions = options[:dimensions].to_i
-      def migration_class_suffix = "#{index_name.camelize}Vec"
+      def migration_class_suffix = "#{table_name.camelize}#{index_name.camelize}Vec"
       def migration_version = "#{ActiveRecord::VERSION::MAJOR}.#{ActiveRecord::VERSION::MINOR}"
     end
   end

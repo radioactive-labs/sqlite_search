@@ -16,7 +16,9 @@ module SqliteSearch
     # Best-effort rerank. `fused` is [[id, score], ...]; returns the same shape
     # in the reranker's order, or the input unchanged on any reranker failure.
     # The reranker returns records, or [record, score] pairs to replace each
-    # record's RRF score with its own. Records outside `fused` are dropped.
+    # record's RRF score with its own. Records outside `fused` and repeats are
+    # dropped. Scoring only some records would mix two score scales in one
+    # column, so it counts as a reranker failure.
     def rerank(query, fused, model:, scope_name:, reranker:)
       return fused unless reranker
       ids = fused.map(&:first)
@@ -24,12 +26,16 @@ module SqliteSearch
       records = ids.filter_map { |id| by_id[id] }
       scores = fused.to_h
       begin
-        reordered = reranker.call(query, records, model: model, scope: scope_name)
-        reordered.filter_map do |entry|
+        reordered = reranker.call(query, records, model: model, scope: scope_name).filter_map do |entry|
           rec, rerank_score = entry.is_a?(Array) ? entry : [entry, nil]
           id = rec.public_send(model.primary_key)
-          [id, rerank_score || scores[id]] if scores.key?(id)
+          [id, rerank_score] if scores.key?(id)
+        end.uniq(&:first)
+        scored = reordered.count { |(_, rerank_score)| rerank_score }
+        unless scored.zero? || scored == reordered.size
+          raise SqliteSearch::Error, "reranker scored #{scored} of #{reordered.size} records; return all records or all [record, score] pairs"
         end
+        reordered.map { |id, rerank_score| [id, rerank_score || scores[id]] }
       rescue => e
         ActiveRecord::Base.logger&.warn { "sqlite_search: rerank failed, using fused order (#{e.class}: #{e.message})" }
         fused

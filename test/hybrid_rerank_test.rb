@@ -108,4 +108,17 @@ class HybridRerankTest < SqliteSearch::TestCase
     SqliteSearch.reranker { |_q, docs, **| docs.map { |d| [d, 1.0] } + [[other, 9.0]] }
     refute_includes @klass.search("coffee").pluck(:id), 3
   end
+
+  def test_reranker_repeating_a_record_does_not_shrink_the_page
+    fused_order = @klass.search("coffee", rerank: false).to_a.map(&:id)
+    # Repeats ahead of the second record would fill both slots with one id.
+    SqliteSearch.reranker { |_q, docs, **| [docs.last, docs.last, docs.first] }
+    assert_equal fused_order.reverse, @klass.search("coffee", limit: 2).to_a.map(&:id)
+  end
+
+  def test_reranker_scoring_only_some_records_degrades_to_fused_order
+    fused_order = @klass.search("coffee", rerank: false).to_a.map(&:id)
+    SqliteSearch.reranker { |_q, docs, **| [[docs.last, 0.9], docs.first] }
+    assert_equal fused_order, @klass.search("coffee").to_a.map(&:id)
+  end
 end

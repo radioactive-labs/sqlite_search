@@ -16,6 +16,9 @@ module SqliteSearch
       end
 
       def fts5_scope(name, against:, source: nil, watch: nil)
+        if source && watch.nil?
+          raise SqliteSearch::Error, "fts5_scope :#{name} uses source:, so it needs watch: (the attributes that change the text)."
+        end
         definition = Fts5::Definition.new(model: self, name: name, against: against, source: source, watch: watch)
         (@sqlite_search_fts5_definitions ||= {})[definition.name] = definition
 
@@ -62,7 +65,7 @@ module SqliteSearch
 
       def reindex(name = nil)
         definitions = name ? [sqlite_search_fts5_definitions.fetch(name.to_sym)] : sqlite_search_fts5_definitions.values
-        definitions.each { |definition| SqliteSearch::Fts5::Backend.new(definition).rebuild(self) }
+        definitions.each { |definition| SqliteSearch::Fts5::Backend.new(definition).rebuild }
       end
 
       def sqlite_search_vec_definitions
@@ -133,8 +136,15 @@ module SqliteSearch
         vec_sync = sync
         SqliteSearch.ensure_embed_job! if vec_sync == :async
         unless vec_sync == :manual
+          # saved_changes in an after_commit callback only reflects the last save
+          # of the transaction, so note a watched change on each save and act on
+          # it at commit.
+          after_save do
+            (@sqlite_search_pending_embeds ||= Set.new) << definition.name if (saved_changes.keys & vec_cols).any?
+          end
+          after_rollback { @sqlite_search_pending_embeds = nil }
           after_save_commit do
-            if (saved_changes.keys & vec_cols).any?
+            if @sqlite_search_pending_embeds&.delete?(definition.name)
               if vec_sync == :inline
                 SqliteSearch::Vec::Backend.new(definition).embed_and_store(self)
               else

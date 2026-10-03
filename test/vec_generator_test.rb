@@ -11,7 +11,7 @@ class VecGeneratorTest < SqliteSearch::TestCase
       SqliteSearch::Generators::VecGenerator.start(
         ["Post", "--index", "semantic", "--dimensions", "768"], destination_root: dir
       )
-      file = Dir[File.join(dir, "db/migrate/*_create_semantic_vec.rb")].first
+      file = Dir[File.join(dir, "db/migrate/*_create_posts_semantic_vec.rb")].first
       refute_nil file, "migration file should be generated"
       assert_match(/create_vec_index :posts, :semantic, dimensions: 768/, File.read(file))
     end
@@ -20,9 +20,20 @@ class VecGeneratorTest < SqliteSearch::TestCase
   def test_default_index_name_is_semantic
     Dir.mktmpdir do |dir|
       SqliteSearch::Generators::VecGenerator.start(["Post", "--dimensions", "3"], destination_root: dir)
-      file = Dir[File.join(dir, "db/migrate/*_create_semantic_vec.rb")].first
+      file = Dir[File.join(dir, "db/migrate/*_create_posts_semantic_vec.rb")].first
       refute_nil file
       assert_match(/create_vec_index :posts, :semantic, dimensions: 3/, File.read(file))
+    end
+  end
+
+  def test_namespaced_model_uses_an_underscored_table_name
+    Dir.mktmpdir do |dir|
+      SqliteSearch::Generators::VecGenerator.start(["Admin::Post", "--dimensions", "3"], destination_root: dir)
+      file = Dir[File.join(dir, "db/migrate/*_create_admin_posts_semantic_vec.rb")].first
+      refute_nil file
+      content = File.read(file)
+      assert_match(/class CreateAdminPostsSemanticVec /, content)
+      assert_match(/create_vec_index :admin_posts, :semantic, dimensions: 3/, content)
     end
   end
 end

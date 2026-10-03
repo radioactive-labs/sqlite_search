@@ -8,7 +8,9 @@ module SqliteSearch
   # operators, punctuation) is dropped, so untrusted input cannot inject
   # MATCH syntax. Terms are AND-joined. Returns nil when nothing usable.
   class Query
-    PHRASE = /"([^"]+)"/
+    # A quoted phrase, or a run of text between quotes. A quote with no partner
+    # matches neither and is skipped.
+    SEGMENT = /"([^"]*)"|([^"]+)/
     TERM_CHARS = /[^[:alnum:]_]+/
     RESERVED = /\A(?:AND|OR|NOT|NEAR)\z/
 
@@ -22,7 +24,7 @@ module SqliteSearch
     end
 
     def to_match
-      tokens = phrases + words
+      tokens = tokenize
       return nil if tokens.empty?
 
       tokens[-1] = "#{tokens[-1]}*" if @prefix && !quoted?(tokens[-1])
@@ -31,12 +33,16 @@ module SqliteSearch
 
     private
 
-    def phrases
-      @raw.scan(PHRASE).map { |(inner)| %("#{inner.strip}") }.reject { |p| p == '""' }
-    end
-
-    def words
-      @raw.gsub(PHRASE, " ").split(TERM_CHARS).reject { |w| w.empty? || w.match?(RESERVED) }
+    # Phrases and words in the order they were typed, so prefix: widens the
+    # last thing typed: never a finished word that came before a phrase.
+    def tokenize
+      @raw.scan(SEGMENT).flat_map do |phrase, text|
+        if phrase
+          phrase.strip.empty? ? [] : [%("#{phrase.strip}")]
+        else
+          text.split(TERM_CHARS).reject { |w| w.empty? || w.match?(RESERVED) }
+        end
+      end
     end
 
     def quoted?(token)

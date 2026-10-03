@@ -16,6 +16,7 @@ module SqliteSearch
         desc: "Index/scope name; the FTS table becomes <table>_<index>_fts (default: search)"
 
       def create_migration_file
+        raise Thor::Error, "Name at least one column to index, e.g. rails g sqlite_search:fts5 Post title body" if columns.empty?
         if options[:weights]
           weights = options[:weights].split(",")
           if weights.length != columns.length
@@ -24,18 +25,16 @@ module SqliteSearch
           end
         end
 
-        migration_template "create_fts5_index.rb.tt", "db/migrate/create_#{index_name}_fts5.rb"
+        migration_template "create_fts5_index.rb.tt", "db/migrate/create_#{table_name}_#{index_name}_fts5.rb"
       end
 
       private
-
-      def table_name = name.tableize
 
       def index_name
         options[:index] || "search"
       end
 
-      def migration_class_suffix = "#{index_name.camelize}Fts5"
+      def migration_class_suffix = "#{table_name.camelize}#{index_name.camelize}Fts5"
 
       def migration_version = "#{ActiveRecord::VERSION::MAJOR}.#{ActiveRecord::VERSION::MINOR}"
 

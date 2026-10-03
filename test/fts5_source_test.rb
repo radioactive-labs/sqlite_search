@@ -55,4 +55,15 @@ class Fts5SourceTest < SqliteSearch::TestCase
     assert_equal ["TEA"], indexed(:text)
     assert_equal [1], @klass.keyword("green").pluck(:id)
   end
+
+  def test_source_without_watch_raises
+    assert_raises(SqliteSearch::Error) do
+      Class.new(ActiveRecord::Base) do
+        self.table_name = "docs"
+        include SqliteSearch::Model
+
+        fts5_scope :keyword, against: {text: 1.0, tags: 2.0}, source: :search_document
+      end
+    end
+  end
 end

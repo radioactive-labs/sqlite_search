@@ -31,7 +31,11 @@ module SqliteSearch
         end
       end
 
-      def rebuild(model)
+      # Rebuilds from the class that declared the scope, not the one reindex was
+      # called on: an STI hierarchy shares one FTS table, so rebuilding from a
+      # subclass must still refill its siblings' rows.
+      def rebuild
+        model = @definition.model
         pk_type = model.columns_hash[model.primary_key.to_s]&.type
         unless pk_type == :integer
           raise SqliteSearch::Error,
@@ -48,7 +52,8 @@ module SqliteSearch
               # Derived text only exists in Ruby, so rebuild record by record.
               model.unscoped.find_each { |record| insert_record(conn, record.public_send(model.primary_key), record) }
             else
-              copy_columns(conn, model)
+              conn.execute(SqliteSearch::Fts5.copy_sql(conn, fts_table: @definition.table_name, source_table: model.table_name,
+                primary_key: model.primary_key, columns: @definition.columns))
             end
           end
         end
@@ -65,17 +70,6 @@ module SqliteSearch
       def insert_record(conn, id, record)
         values = @definition.values_for(record)
         insert_row(conn, id, values) unless values.all? { |v| v.nil? || v.to_s.empty? }
-      end
-
-      def copy_columns(conn, model)
-        col_list = @definition.columns.map { |c| conn.quote_column_name(c) }.join(", ")
-        non_blank = @definition.columns.map { |c| "COALESCE(#{conn.quote_column_name(c)}, '')" }.join(" || ")
-        conn.execute(<<~SQL.squish)
-          INSERT INTO #{quoted(conn)} (rowid, #{col_list})
-          SELECT #{conn.quote_column_name(model.primary_key)}, #{col_list}
-          FROM #{conn.quote_table_name(model.table_name)}
-          WHERE (#{non_blank}) <> ''
-        SQL
       end
 
       def insert_row(conn, id, values)

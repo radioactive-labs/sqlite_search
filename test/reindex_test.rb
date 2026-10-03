@@ -68,4 +68,32 @@ class ReindexTest < SqliteSearch::TestCase
     assert_raises(ActiveRecord::StatementInvalid) { broken.reindex }
     assert_equal [1], @klass.by_body("coffee").pluck(:id)
   end
+
+  class StiDoc < ActiveRecord::Base
+    self.table_name = "sti_docs"
+    include SqliteSearch::Model
+
+    fts5_scope :keyword, against: :text, source: :search_document, watch: [:body]
+
+    def search_document = {text: body.to_s}
+  end
+
+  class StiArticle < StiDoc; end
+
+  class StiNote < StiDoc; end
+
+  def test_reindex_from_an_sti_subclass_keeps_sibling_rows
+    @conn.create_table(:sti_docs, force: true) { |t|
+      t.string :type
+      t.text :body
+    }
+    @conn.create_virtual_table("sti_docs_keyword_fts", :fts5, ["text"])
+    StiArticle.create!(id: 1, body: "coffee article")
+    StiNote.create!(id: 2, body: "coffee note")
+
+    StiArticle.reindex(:keyword)
+    assert_equal [1, 2], StiDoc.keyword("coffee").order(:id).pluck(:id)
+  ensure
+    %w[sti_docs_keyword_fts sti_docs].each { |t| @conn.execute("DROP TABLE IF EXISTS #{@conn.quote_table_name(t)}") }
+  end
 end

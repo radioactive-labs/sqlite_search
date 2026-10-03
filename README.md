@@ -133,10 +133,11 @@ class Article < ApplicationRecord
 end
 ```
 
-`watch:` defaults to the `against:` columns. `reindex` rebuilds a `source:`
-index record by record in Ruby, inside one transaction. `backfill: true` in the
-migration copies columns straight from the table, so it does not apply here;
-run `reindex` after the migration instead.
+`watch:` is required with `source:` (without `source:` it defaults to the
+`against:` columns). `reindex` rebuilds a `source:` index record by record in
+Ruby, inside one transaction. `backfill: true` in the migration copies columns
+straight from the table, so it does not apply here (it raises if the table lacks
+the `against:` columns); run `reindex` after the migration instead.
 
 ### Query
 
@@ -360,8 +361,10 @@ record's `<name>_score` becomes your reranker's score. You can also return just
 the records, reordered, and `<name>_score` keeps the fused RRF score. Either way
 the order you return is the result order. Records are matched back by primary
 key: a candidate you leave out is dropped from the results, a record that was
-not a candidate is ignored, and an empty array gives `.none`. The top `limit`
-of your order comes back.
+not a candidate is ignored, a repeat of a record is ignored, and an empty array
+gives `.none`. The top `limit` of your order comes back. Score all the records
+or none: mixing pairs and bare records would put two score scales in one
+column, so it counts as a reranker failure.
 
 `model:` is the class the search was called on, and `scope:` is the hybrid
 scope name (the same pair is passed to the embedder block). Reranking is

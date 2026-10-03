@@ -56,4 +56,12 @@ class MigrationTest < SqliteSearch::TestCase
     migration.migrate(:down)
     assert_raises(ActiveRecord::StatementInvalid) { @conn.select_value("SELECT count(*) FROM posts_by_body_fts") }
   end
+
+  def test_backfill_of_a_column_the_table_lacks_raises_a_clear_error
+    error = assert_raises(SqliteSearch::Error) do
+      Runner.new.create_fts5_index(:posts, :full, against: [:body, :tags], backfill: true)
+    end
+    assert_match(/no tags/, error.message)
+    assert_match(/Model\.reindex/, error.message)
+  end
 end

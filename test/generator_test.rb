@@ -11,7 +11,7 @@ class GeneratorTest < SqliteSearch::TestCase
       SqliteSearch::Generators::Fts5Generator.start(
         ["Post", "title", "body", "--weights", "2,1"], destination_root: dir
       )
-      file = Dir[File.join(dir, "db/migrate/*_create_search_fts5.rb")].first
+      file = Dir[File.join(dir, "db/migrate/*_create_posts_search_fts5.rb")].first
       refute_nil file, "migration file should be generated"
       content = File.read(file)
       # default index name is "search" -> table posts_search_fts (not posts_post_search_fts)
@@ -24,7 +24,7 @@ class GeneratorTest < SqliteSearch::TestCase
       SqliteSearch::Generators::Fts5Generator.start(
         ["Post", "body", "--index", "by_body"], destination_root: dir
       )
-      file = Dir[File.join(dir, "db/migrate/*_create_by_body_fts5.rb")].first
+      file = Dir[File.join(dir, "db/migrate/*_create_posts_by_body_fts5.rb")].first
       refute_nil file, "migration file should be generated with the custom index name"
       content = File.read(file)
       assert_match(/create_fts5_index :posts, :by_body, against: :body/, content)
@@ -40,6 +40,37 @@ class GeneratorTest < SqliteSearch::TestCase
           ["Post", "title", "body", "summary", "--weights", "2,1"], destination_root: dir, debug: true
         )
       end
+    end
+  end
+
+  def test_two_models_get_distinct_migrations
+    Dir.mktmpdir do |dir|
+      SqliteSearch::Generators::Fts5Generator.start(["Post", "title"], destination_root: dir)
+      SqliteSearch::Generators::Fts5Generator.start(["Comment", "body"], destination_root: dir)
+      files = Dir[File.join(dir, "db/migrate/*.rb")].map { |f| File.basename(f).sub(/\A\d+_/, "") }.sort
+      assert_equal %w[create_comments_search_fts5.rb create_posts_search_fts5.rb], files
+      classes = Dir[File.join(dir, "db/migrate/*.rb")].map { |f| File.read(f)[/class (\w+)/, 1] }.sort
+      assert_equal %w[CreateCommentsSearchFts5 CreatePostsSearchFts5], classes
+    end
+  end
+
+  def test_namespaced_model_uses_an_underscored_table_name
+    Dir.mktmpdir do |dir|
+      SqliteSearch::Generators::Fts5Generator.start(["Admin::Post", "body"], destination_root: dir)
+      file = Dir[File.join(dir, "db/migrate/*_create_admin_posts_search_fts5.rb")].first
+      refute_nil file
+      content = File.read(file)
+      assert_match(/class CreateAdminPostsSearchFts5 /, content)
+      assert_match(/create_fts5_index :admin_posts, :search, against: :body/, content)
+    end
+  end
+
+  def test_no_columns_raises
+    Dir.mktmpdir do |dir|
+      assert_raises(Thor::Error) do
+        SqliteSearch::Generators::Fts5Generator.start(["Post"], destination_root: dir, debug: true)
+      end
+      assert_empty Dir[File.join(dir, "db/migrate/*.rb")]
     end
   end
 end

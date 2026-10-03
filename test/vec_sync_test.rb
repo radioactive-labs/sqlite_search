@@ -119,4 +119,46 @@ class VecSyncTest < SqliteSearch::TestCase
   ensure
     %w[docs_semantic_vec docs].each { |t| @conn.execute("DROP TABLE IF EXISTS #{@conn.quote_table_name(t)}") }
   end
+
+  def test_watched_change_from_an_earlier_save_in_the_transaction_reembeds
+    k = inline_klass
+    p = k.create!(id: 1, body: "coffee")
+    before = @conn.select_value("SELECT vec_to_json(embedding) FROM posts_semantic_vec WHERE id = 1")
+    k.transaction do
+      p.update!(body: "green tea")
+      p.update!(title: "renamed") # last save leaves only title in saved_changes
+    end
+    after = @conn.select_value("SELECT vec_to_json(embedding) FROM posts_semantic_vec WHERE id = 1")
+    refute_equal before, after
+  end
+
+  def test_rolled_back_change_does_not_reembed_on_a_later_commit
+    k = inline_klass
+    p = k.create!(id: 1, body: "coffee")
+    k.transaction do
+      p.update!(body: "green tea")
+      raise ActiveRecord::Rollback
+    end
+    p.reload
+    @conn.execute("DELETE FROM posts_semantic_vec")
+    p.update!(title: "renamed")
+    assert_equal 0, vec_count
+  end
+
+  def test_embed_job_reaches_records_hidden_by_a_default_scope
+    k = Class.new(ActiveRecord::Base) do
+      self.table_name = "posts"
+      include SqliteSearch::Model
+
+      default_scope { where.not(title: "hidden") }
+      vec_scope :semantic, against: :body, dimensions: 3, sync: :manual
+    end
+    Object.const_set(:HiddenEmbedPost, k)
+    SqliteSearch.ensure_embed_job! # sync: :manual never defines it
+    k.unscoped.create!(id: 1, body: "coffee", title: "hidden")
+    SqliteSearch::EmbedJob.perform_now("HiddenEmbedPost", 1, "semantic")
+    assert_equal 1, vec_count
+  ensure
+    Object.send(:remove_const, :HiddenEmbedPost) if Object.const_defined?(:HiddenEmbedPost)
+  end
 end
