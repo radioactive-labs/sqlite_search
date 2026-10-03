@@ -11,7 +11,7 @@ confirm the issue still reproduces before reporting it.
 
 | Version | Supported |
 | ------- | --------- |
-| Latest `0.x` release | ✅ |
+| `0.1.x` | ✅ |
 | Older releases | ❌ |
 
 ## Reporting a vulnerability

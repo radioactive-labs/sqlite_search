@@ -1,8 +1,6 @@
 # Changelog
 
-All notable changes to this project are documented here. The format is based on
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
@@ -30,5 +28,3 @@ All notable changes to this project are documented here. The format is based on
   `fts5_threshold:` / `vec_threshold:` on hybrid scopes.
 - A reranker can return `[record, score]` pairs, which set each result's
   `<name>_score` to the reranker's score.
-
-[Unreleased]: https://github.com/radioactive-labs/sqlite_search/commits/main

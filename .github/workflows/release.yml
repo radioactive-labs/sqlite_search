@@ -27,11 +27,22 @@ jobs:
       - name: Build gem
         run: gem build sqlite_search.gemspec
 
+      # The notes are this version's CHANGELOG section, as reviewed and committed
+      # by rake release:prepare (git-cliff output plus any hand edits).
+      - name: Extract release notes
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v head="## [$version]" '
+            /^## \[/ { if (found) exit; found = index($0, head) == 1; next }
+            found
+          ' CHANGELOG.md > RELEASE_NOTES.md
+          test -s RELEASE_NOTES.md || { echo "No CHANGELOG.md section for $version"; exit 1; }
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body_path: RELEASE_NOTES.md
           files: sqlite_search-*.gem
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
