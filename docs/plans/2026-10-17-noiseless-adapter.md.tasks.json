@@ -1,0 +1,85 @@
+{
+  "planPath": "docs/plans/2026-10-17-noiseless-adapter.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 0: Ruby 4 + noiseless bundle and CI job (feasibility gate)",
+      "status": "completed",
+      "description": "**Goal:** A second bundle with noiseless that runs the full existing suite green on Ruby 4.0 / Rails 8.1, wired into CI.\n\n**Files:**\n- Create: `gemfiles/noiseless.gemfile`\n- Create: `.gitignore`\n- Modify: `.github/workflows/ci.yml`\n\n**Acceptance Criteria:**\n- [ ] `$R4 bundle exec rake test` passes with the existing suite (0 failures, 0 errors)\n- [ ] `require \"noiseless\"` loads alongside sqlite_search in that bundle\n- [ ] `bundle exec rake test` (Ruby 3.3 default bundle) is unchanged\n- [ ] CI has a `noiseless` job using Ruby 4.0 and the new gemfile\n\n**Verify:** `$R4 bundle exec rake test` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"gemfiles/noiseless.gemfile\", \".gitignore\", \".github/workflows/ci.yml\"], \"verifyCommand\": \"env PATH=$HOME/.frum/versions/4.0.7/bin:$PATH BUNDLE_GEMFILE=gemfiles/noiseless.gemfile bundle exec rake test\", \"acceptanceCriteria\": [\"existing suite green on Ruby 4.0 with noiseless bundled\", \"noiseless loads alongside sqlite_search\", \"Ruby 3.3 bundle unchanged\", \"CI noiseless job added\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 1: FTS5 query options in `SqliteSearch::Query`",
+      "status": "completed",
+      "description": "**Goal:** `Query.build` supports `operator:`, `phrase:`, `minimum_should_match:`, and `columns:` while staying injection-safe.\n\n**Files:**\n- Modify: `lib/sqlite_search/query.rb`\n- Test: `test/query_test.rb`\n\n**Acceptance Criteria:**\n- [ ] `operator: :or` OR-joins terms; unknown operators raise `SqliteSearch::Error`\n- [ ] `phrase: true` makes one FTS5 phrase (with `prefix:` → `\"...\" *`)\n- [ ] `minimum_should_match:` follows ES rules (int, negative, percent, negative percent), clamps to `1..terms`, collapses to AND/OR at the ends, expands n-of-m otherwise\n- [ ] Expansion over 6 terms raises `SqliteSearch::Query::TooManyTerms` (a `SqliteSearch::Error`)\n- [ ] `columns:` wraps the expression as `{\"a\" \"b\"} : (expr)`\n- [ ] Existing query tests still pass unchanged\n\n**Verify:** `bundle exec ruby -Itest -Ilib test/query_test.rb` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/query.rb\", \"test/query_test.rb\"], \"verifyCommand\": \"bundle exec ruby -Itest -Ilib test/query_test.rb\", \"acceptanceCriteria\": [\"operator: :or joins with OR; unknown raises\", \"phrase: true builds one phrase, prefix stars it\", \"minimum_should_match ES rules with clamp and collapse\", \"expansion over 6 terms raises TooManyTerms\", \"columns: wraps in column filter\", \"existing tests pass\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 2,
+      "subject": "Task 2: FTS5 scope options, per-query bm25 weights, `sqlite_search_fts5_for`",
+      "status": "completed",
+      "description": "**Goal:** `fts5_scope` calls accept the Task 1 options and `columns:`, `order_by_rank` accepts `weights:`, and models can find the FTS index covering a field list.\n\n**Files:**\n- Modify: `lib/sqlite_search/model.rb` (the `fts5_scope` scope lambda, `order_by_rank`, new `sqlite_search_fts5_for`)\n- Modify: `lib/sqlite_search/fts5/definition.rb` (`bm25_expression`, new `query_weights`)\n- Modify: `lib/sqlite_search/fts5.rb` (`NullRank`)\n- Test: `test/rank_test.rb`, `test/definition_lookup_test.rb` (new)\n\n**Acceptance Criteria:**\n- [ ] `Post.full(\"coffee\", columns: [:title])` matches only title hits; unknown columns raise `SqliteSearch::Error`\n- [ ] `operator:`, `phrase:`, `minimum_should_match:` pass through to `Query.build`\n- [ ] `order_by_rank(weights: {body: 1.0})` ranks by those weights; unlisted columns weigh 0; unknown columns raise\n- [ ] `.none` from a blank query still chains `order_by_rank(weights:)`\n- [ ] `sqlite_search_fts5_for(fields)` picks the covering definition with the fewest columns, ties by declaration order, nil if none\n\n**Verify:** `bundle exec ruby -Itest -Ilib test/rank_test.rb && bundle exec ruby -Itest -Ilib test/definition_lookup_test.rb` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/model.rb\", \"lib/sqlite_search/fts5/definition.rb\", \"lib/sqlite_search/fts5.rb\", \"test/rank_test.rb\", \"test/definition_lookup_test.rb\"], \"verifyCommand\": \"bundle exec rake test\", \"acceptanceCriteria\": [\"columns: restricts and validates\", \"operator/phrase/minimum_should_match pass through\", \"order_by_rank(weights:) with 0 for unlisted, unknown raises\", \"NullRank accepts weights:\", \"sqlite_search_fts5_for selection rules\"], \"requiresUserVerification\": false}\n```",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "subject": "Task 3: `vec_scope(vector:)` and `sqlite_search_vec_for`",
+      "status": "completed",
+      "description": "**Goal:** Vec scopes accept a precomputed embedding, and models can look up a vec definition by name.\n\n**Files:**\n- Modify: `lib/sqlite_search/model.rb` (vec scope lambda, new `sqlite_search_vec_for`)\n- Modify: `lib/sqlite_search/vec/definition.rb` (new `check_dimensions`)\n- Test: `test/vec_query_test.rb`, `test/definition_lookup_test.rb`\n\n**Acceptance Criteria:**\n- [ ] `Post.semantic(vector: [...])` runs KNN without calling the embedder, honoring `k:`\n- [ ] Passing both a query and `vector:` raises `SqliteSearch::Error`\n- [ ] A vector of the wrong length raises `SqliteSearch::Error`\n- [ ] `sqlite_search_vec_for(name)` returns the definition or nil\n\n**Verify:** `bundle exec ruby -Itest -Ilib test/vec_query_test.rb && bundle exec ruby -Itest -Ilib test/definition_lookup_test.rb` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/model.rb\", \"lib/sqlite_search/vec/definition.rb\", \"test/vec_query_test.rb\", \"test/definition_lookup_test.rb\"], \"verifyCommand\": \"bundle exec rake test\", \"acceptanceCriteria\": [\"vector: runs KNN without embedder, honors k\", \"query + vector raises\", \"wrong dimensions raise\", \"sqlite_search_vec_for returns definition or nil\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 4,
+      "subject": "Task 4: Weighted RRF and `hybrid_scope` arm weights",
+      "status": "completed",
+      "description": "**Goal:** `Hybrid.rrf` takes per-arm weights (own implementation, deterministic ties) and `hybrid_scope` calls accept `fts5_weight:` / `vec_weight:`.\n\n**Files:**\n- Modify: `lib/sqlite_search/hybrid.rb` (`rrf`)\n- Modify: `lib/sqlite_search/model.rb` (`hybrid_scope` lambda)\n- Test: `test/hybrid_rrf_test.rb` (new), `test/hybrid_test.rb`\n\n**Acceptance Criteria:**\n- [ ] Default weights give the same scores as `Neighbor::Reranking.rrf`\n- [ ] `weights: [2.0, 1.0]` scales each arm's contribution\n- [ ] Ties break by first appearance (list a, then list b)\n- [ ] Negative, non-finite, or all-zero weights raise `SqliteSearch::Error`\n- [ ] `hybrid_scope` passes `fts5_weight:` / `vec_weight:` (default 1.0) to `rrf`\n\n**Verify:** `bundle exec ruby -Itest -Ilib test/hybrid_rrf_test.rb && bundle exec ruby -Itest -Ilib test/hybrid_test.rb` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/hybrid.rb\", \"lib/sqlite_search/model.rb\", \"test/hybrid_rrf_test.rb\", \"test/hybrid_test.rb\"], \"verifyCommand\": \"bundle exec rake test\", \"acceptanceCriteria\": [\"default weights match neighbor scores\", \"weights scale arms\", \"deterministic tie order\", \"invalid weights raise\", \"hybrid_scope passes fts5_weight/vec_weight\"], \"requiresUserVerification\": false}\n```"
+    },
+    {
+      "id": 5,
+      "subject": "Task 5: Adapter skeleton — entry point, policy, response, filters/sort/pagination, writes",
+      "status": "completed",
+      "description": "**Goal:** `adapter: sqlite` resolves to a working adapter that answers filter/sort/paginate queries, enforces strict/lax for root options, and no-ops writes.\n\n**Files:**\n- Create: `lib/sqlite_search/noiseless.rb`\n- Create: `lib/sqlite_search/noiseless_adapter/unsupported.rb`\n- Create: `lib/sqlite_search/noiseless_adapter/response.rb`\n- Create: `lib/sqlite_search/noiseless_adapter/translator.rb`\n- Create: `lib/sqlite_search/noiseless_adapter/sqlite.rb`\n- Test: `test/noiseless_adapter/helper.rb`, `test/noiseless_adapter/adapter_test.rb`, `test/noiseless_adapter/response_test.rb`, `test/noiseless_adapter/unsupported_test.rb`\n\n**Acceptance Criteria:**\n- [ ] `Noiseless::Adapters.lookup(\"sqlite\")` returns `Noiseless::Adapters::Sqlite`; `unsupported:` accepts `strict`/`lax` as string or symbol, anything else raises `ArgumentError`\n- [ ] Scalar, array, and range filters; sort with primary-key tiebreak; offset pagination; totals before pagination; score 1.0\n- [ ] Model resolution: AR `model_class` → `register_model` → `index.classify`; otherwise `Noiseless::SearchError`\n- [ ] Narrowing root options (`search_after`, `should`, image search, geo filter, non-column filter) raise under strict and return zero hits under lax\n- [ ] Decorative root options (aggregations, collapse, pipeline, conversational, joins, remove_duplicates, facet_sample_slope, pinned_hits, non-column sort) raise under strict; under lax they are skipped and logged once\n- [ ] Document writes/bulk return `\"result\" => \"noop\"` and change nothing; `index_exists?` / `document_exists?` / `cluster.health` work\n- [ ] Without noiseless installed (Ruby 3.3 bundle) these tests skip\n\n**Verify:** `$R4 bundle exec ruby -Itest -Ilib -e 'Dir[\"test/noiseless_adapter/*_test.rb\"].each { |f| require File.expand_path(f) }'` → `0 failures, 0 errors`; and `bundle exec rake test` (Ruby 3.3) → adapter tests reported as skips.\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/noiseless.rb\", \"lib/sqlite_search/noiseless_adapter/unsupported.rb\", \"lib/sqlite_search/noiseless_adapter/response.rb\", \"lib/sqlite_search/noiseless_adapter/translator.rb\", \"lib/sqlite_search/noiseless_adapter/sqlite.rb\", \"test/noiseless_adapter/helper.rb\", \"test/noiseless_adapter/adapter_test.rb\", \"test/noiseless_adapter/response_test.rb\", \"test/noiseless_adapter/unsupported_test.rb\"], \"verifyCommand\": \"env PATH=$HOME/.frum/versions/4.0.7/bin:$PATH BUNDLE_GEMFILE=gemfiles/noiseless.gemfile bundle exec rake test\", \"acceptanceCriteria\": [\"lookup resolves sqlite adapter; mode validation\", \"filters/sort/pagination/totals\", \"model resolution order and error\", \"narrowing options strict raise / lax zero hits\", \"decorative options strict raise / lax skip + one log line\", \"no-op writes, existence checks, health\", \"skips on Ruby 3.3 bundle\"], \"requiresUserVerification\": false}\n```",
+      "blockedBy": [
+        0
+      ]
+    },
+    {
+      "id": 6,
+      "subject": "Task 6: Text queries — ES options, FTS5 with ranking, LIKE fallback, wildcard/prefix/range",
+      "status": "completed",
+      "description": "**Goal:** `match`, `multi_match`, `combined_fields`, `wildcard`, `prefix`, and `range` translate per spec B3/B4.\n\n**Files:**\n- Create: `lib/sqlite_search/noiseless_adapter/text_options.rb`\n- Modify: `lib/sqlite_search/noiseless.rb` (require text_options before translator)\n- Modify: `lib/sqlite_search/noiseless_adapter/translator.rb` (replace `apply_musts` and `ranked`; add text helpers)\n- Test: `test/noiseless_adapter/text_test.rb`\n\n**Acceptance Criteria:**\n- [ ] A covering `fts5_scope` serves the clause, restricted to the listed columns, ES default operator OR; a single FTS clause scores by `<name>_rank`\n- [ ] `operator`, `type` (best/most/cross_fields, phrase, phrase_prefix, bool_prefix), `^boost`, `minimum_should_match`, `zero_terms_query` honored\n- [ ] `minimum_should_match` over 6 terms: strict raises, lax falls back to AND\n- [ ] `fuzziness` and unknown options: strict raises, lax skips; `boost`/`tie_breaker`/`analyzer`/`lenient`/`auto_generate_synonyms_phrase_query` silently ignored\n- [ ] No covering index → `LIKE` on text columns (score 1.0); non-text fields only → narrowing\n- [ ] `wildcard` / `prefix` use escaped `LIKE`; `range` must uses comparisons\n- [ ] Several text clauses AND together and score 1.0\n\n**Verify:** `$R4 bundle exec ruby -Itest -Ilib test/noiseless_adapter/text_test.rb` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/noiseless_adapter/text_options.rb\", \"lib/sqlite_search/noiseless.rb\", \"lib/sqlite_search/noiseless_adapter/translator.rb\", \"test/noiseless_adapter/text_test.rb\"], \"verifyCommand\": \"env PATH=$HOME/.frum/versions/4.0.7/bin:$PATH BUNDLE_GEMFILE=gemfiles/noiseless.gemfile bundle exec rake test\", \"acceptanceCriteria\": [\"covering fts5_scope with columns and default OR; rank score\", \"operator/type/boost/msm/zero_terms honored\", \"msm over cap strict raise / lax AND\", \"fuzziness/unknown strict raise / lax skip; scoring-only options ignored\", \"LIKE fallback; non-text narrowing\", \"escaped wildcard/prefix; range must\", \"multiple text clauses AND with constant score\"], \"requiresUserVerification\": false}\n```",
+      "blockedBy": [
+        1,
+        2,
+        5
+      ]
+    },
+    {
+      "id": 7,
+      "subject": "Task 7: Vector and hybrid queries",
+      "status": "completed",
+      "description": "**Goal:** `vector`/`knn` runs the named `vec_scope` with the caller's embedding, and `hybrid` fuses an FTS arm and a vec arm with weighted RRF.\n\n**Files:**\n- Modify: `lib/sqlite_search/noiseless_adapter/translator.rb` (replace `vector` and `hybrid`; add helpers)\n- Test: `test/noiseless_adapter/vector_test.rb`\n\n**Acceptance Criteria:**\n- [ ] KNN results nearest first, `total` capped at `k`, cosine score = similarity, euclidean score = `1/(1+d)`\n- [ ] Filters and musts pre-filter the KNN\n- [ ] Missing vec scope, distance mismatch, `inner_product`, wrong dimensions raise `Noiseless::SearchError` in both modes\n- [ ] Hybrid fuses with `text_weight`/`vector_weight`; weights change the winner\n- [ ] Hybrid without a covering FTS index, or with empty fields on a model with several fts5 scopes, raises\n- [ ] Hybrid respects filters\n\n**Verify:** `$R4 bundle exec ruby -Itest -Ilib test/noiseless_adapter/vector_test.rb` → `0 failures, 0 errors`\n\n```json:metadata\n{\"files\": [\"lib/sqlite_search/noiseless_adapter/translator.rb\", \"test/noiseless_adapter/vector_test.rb\"], \"verifyCommand\": \"env PATH=$HOME/.frum/versions/4.0.7/bin:$PATH BUNDLE_GEMFILE=gemfiles/noiseless.gemfile bundle exec rake test\", \"acceptanceCriteria\": [\"KNN nearest first, total capped at k, cosine/euclidean scores\", \"filters and musts pre-filter KNN\", \"config errors raise in both modes\", \"hybrid weighted fusion; weights pick winner\", \"hybrid fts index requirements\", \"hybrid respects filters\"], \"requiresUserVerification\": false}\n```",
+      "blockedBy": [
+        3,
+        4,
+        6
+      ]
+    },
+    {
+      "id": 8,
+      "subject": "Task 8: Documentation",
+      "status": "completed",
+      "description": "**Goal:** README documents the new core options and the noiseless adapter.\n\n**Files:**\n- Modify: `README.md`\n\n**Acceptance Criteria:**\n- [ ] Full-text \"Query\" section documents `columns:`, `operator:`, `phrase:`, `minimum_should_match:`; \"Ranking\" documents `order_by_rank(weights:)`\n- [ ] Vector \"Query\" documents `vector:`; Hybrid documents `fts5_weight:` / `vec_weight:`\n- [ ] New \"Using with noiseless\" section: install/require, config, which scopes serve which queries, strict/lax, support matrix, known differences\n- [ ] Every code sample matches the implemented API\n\n**Verify:** `grep -n \"Using with noiseless\\|vector:\\|fts5_weight\\|minimum_should_match\\|order_by_rank(weights\" README.md` → hits in each section\n\n```json:metadata\n{\"files\": [\"README.md\"], \"verifyCommand\": \"grep -n \\\"Using with noiseless\\\\|vector:\\\\|fts5_weight\\\\|minimum_should_match\\\\|order_by_rank(weights\\\" README.md\", \"acceptanceCriteria\": [\"FTS options and ranking weights documented\", \"vector: and hybrid weights documented\", \"noiseless section with config, mapping, strict/lax, differences\", \"samples match API\"], \"requiresUserVerification\": false}\n```",
+      "blockedBy": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ]
+    }
+  ],
+  "lastUpdated": "2026-10-18T03:29:11.561997+00:00"
+}

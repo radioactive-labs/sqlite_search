@@ -4,13 +4,40 @@ module SqliteSearch
   module Hybrid
     module_function
 
-    # Reciprocal Rank Fusion of two id lists (each already in rank order).
-    # Returns [[id, score], ...] sorted by fused score desc.
-    def rrf(ids_a, ids_b, k: 60)
-      require "neighbor"
-      a = ids_a.map { |id| {id: id} }
-      b = ids_b.map { |id| {id: id} }
-      Neighbor::Reranking.rrf(a, b, k: k).map { |row| [row[:result][:id], row[:score]] }
+    # Weighted Reciprocal Rank Fusion of two id lists (each already in rank
+    # order): score = w_a / (k + rank_a) + w_b / (k + rank_b), ranks 1-based,
+    # an absent id contributing 0. A zero-weight list is left out entirely.
+    # Returns [[id, score], ...] by score desc; ties keep first appearance
+    # (list a, then list b).
+    def rrf(ids_a, ids_b, k: 60, weights: [1.0, 1.0])
+      raise SqliteSearch::Error, "RRF takes 2 weights, got #{weights.inspect}." unless weights.size == 2
+      weights = weights.map { |weight| Float(weight) }
+      if weights.any? { |weight| !weight.finite? || weight.negative? } || weights.all?(&:zero?)
+        raise SqliteSearch::Error, "RRF weights must be finite, non-negative, and not all zero, got #{weights.inspect}."
+      end
+      scores = Hash.new(0.0)
+      [ids_a, ids_b].zip(weights).each do |ids, weight|
+        next if weight.zero?
+        ids.each_with_index { |id, index| scores[id] += weight / (k + index + 1) }
+      end
+      scores.each_with_index.sort_by { |(_, score), index| [-score, index] }.map(&:first)
+    end
+
+    # `relation` narrowed to the fused ids, in fused order, with each fused
+    # score selected AS score_column. Rank and score come from Ruby, so they
+    # are carried as SQL CASE expressions: the score becomes a real attribute
+    # (works with pluck, first, etc.) and the fused order replaces any order
+    # chained before.
+    def relation(relation, fused, score_column)
+      model = relation.klass
+      ids = fused.map(&:first)
+      model.with_connection do |conn|
+        pk_sql = "#{model.quoted_table_name}.#{conn.quote_column_name(model.primary_key)}"
+        relation.where(model.primary_key => ids)
+          .reorder(Arel.sql(Sql.id_case(pk_sql, ids.each_with_index.to_h, conn)))
+          .select("#{model.quoted_table_name}.*, #{Sql.id_case(pk_sql, fused.to_h, conn)} AS #{score_column}")
+          .extending(ScoredRelation)
+      end
     end
 
     # Best-effort rerank. `fused` is [[id, score], ...]; returns the same shape

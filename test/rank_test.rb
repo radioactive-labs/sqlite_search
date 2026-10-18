@@ -71,4 +71,49 @@ class RankTest < SqliteSearch::TestCase
   def test_threshold_is_safe_on_blank
     assert_equal [], @klass.full("").order_by_rank(threshold: 1.0).to_a
   end
+
+  def test_columns_restricts_match_to_listed_columns
+    assert_equal [2], @klass.full("coffee", columns: [:title]).pluck(:id)
+  end
+
+  def test_columns_rejects_unknown_column
+    assert_raises(SqliteSearch::Error) { @klass.full("coffee", columns: [:nope]) }
+  end
+
+  def test_operator_or_widens_match
+    @klass.create!(id: 3, title: "tea", body: "misc")
+    assert_equal [], @klass.full("coffee tea").pluck(:id)
+    assert_equal [1, 2, 3], @klass.full("coffee tea", operator: :or).order(:id).pluck(:id)
+  end
+
+  def test_minimum_should_match_and_phrase_pass_through
+    @klass.create!(id: 3, title: "tea", body: "coffee coffee")
+    assert_equal [3], @klass.full("coffee tea juice", minimum_should_match: 2).pluck(:id)
+    assert_equal [1, 3], @klass.full("coffee coffee", phrase: true).order(:id).pluck(:id)
+  end
+
+  def test_order_by_rank_weights_override_against_weights
+    # body weighted alone: row 1 (body "coffee coffee") beats row 2 (title only)
+    assert_equal [1, 2], @klass.full("coffee").order_by_rank(weights: {body: 1.0}).pluck(:id)
+  end
+
+  def test_order_by_rank_weights_reject_unknown_column
+    assert_raises(SqliteSearch::Error) { @klass.full("coffee").order_by_rank(weights: {nope: 1.0}) }
+  end
+
+  def test_order_by_rank_weights_reject_negative_or_non_finite
+    error = assert_raises(SqliteSearch::Error) { @klass.full("coffee").order_by_rank(weights: {body: -1.0}).to_a }
+    assert_match(/fts5_scope :full/, error.message)
+    assert_raises(SqliteSearch::Error) { @klass.full("coffee").order_by_rank(weights: {body: Float::NAN}).to_a }
+    assert_raises(SqliteSearch::Error) { @klass.full("coffee").order_by_rank(weights: {body: Float::INFINITY}).to_a }
+  end
+
+  def test_order_by_rank_unknown_weight_column_lists_the_scope_columns
+    error = assert_raises(SqliteSearch::Error) { @klass.full("coffee").order_by_rank(weights: {nope: 1.0}) }
+    assert_match(/fts5_scope :full has no column\(s\) nope to weight; its columns are title, body\./, error.message)
+  end
+
+  def test_order_by_rank_weights_safe_on_blank
+    assert_equal [], @klass.full("").order_by_rank(weights: {body: 1.0}).to_a
+  end
 end

@@ -50,6 +50,13 @@ class ModelScopeTest < SqliteSearch::TestCase
     assert_equal [1, 2], @post_class.by_body(raw: "coffee OR tea").order(:id).pluck(:id)
   end
 
+  def test_raw_cannot_be_combined_with_sanitizer_options
+    [{prefix: true}, {operator: :or}, {phrase: true}, {minimum_should_match: 1}, {columns: [:body]}].each do |options|
+      error = assert_raises(SqliteSearch::Error) { @post_class.by_body(raw: "coffee", **options) }
+      assert_match(/raw: bypasses the sanitizer, so it can't be combined with #{options.keys.first}:/, error.message)
+    end
+  end
+
   def test_prefix_option_matches_prefix
     assert_equal [1], @post_class.by_body("mor", prefix: true).pluck(:id) # "morning"
   end

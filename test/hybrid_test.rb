@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "minitest/mock"
 
 class HybridTest < SqliteSearch::TestCase
   def setup
@@ -104,5 +105,29 @@ class HybridTest < SqliteSearch::TestCase
   def test_fts5_threshold_drops_weak_keyword_matches
     ids = @klass.search("coffee", rerank: false, fts5_threshold: 1_000.0, vec_threshold: 2.0).pluck(:id)
     assert_empty ids
+  end
+
+  def test_zero_vec_weight_skips_the_vector_arm
+    definition = @klass.sqlite_search_vec_definitions[:semantic]
+    definition.stub(:embed, ->(*) { flunk "embedder called" }) do
+      assert_equal [1, 3], @klass.search("coffee", rerank: false, vec_weight: 0).pluck(:id).sort
+    end
+  end
+
+  def test_zero_fts5_weight_skips_the_keyword_arm
+    @klass.stub(:by_body, ->(*) { flunk "fts arm ran" }) do
+      assert_includes @klass.search("coffee", rerank: false, fts5_weight: 0).pluck(:id), 2
+    end
+  end
+
+  def test_arm_weights_reach_rrf
+    seen = nil
+    rrf = SqliteSearch::Hybrid.method(:rrf)
+    capture = ->(a, b, k:, weights:) {
+      seen = weights
+      rrf.call(a, b, k: k, weights: weights)
+    }
+    SqliteSearch::Hybrid.stub(:rrf, capture) { @klass.search("coffee", fts5_weight: 2.0, vec_weight: 0.5) }
+    assert_equal [2.0, 0.5], seen
   end
 end

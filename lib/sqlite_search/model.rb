@@ -8,11 +8,25 @@ module SqliteSearch
   module Model
     extend ActiveSupport::Concern
 
+    # fts5_scope options that shape the sanitized query, with their defaults;
+    # raw: skips the sanitizer, so it takes none of them.
+    QUERY_OPTION_DEFAULTS = {prefix: false, operator: :and, phrase: false, minimum_should_match: nil, columns: nil}.freeze
+
     class_methods do
       def sqlite_search_fts5_definitions
         own = (@sqlite_search_fts5_definitions ||= {})
         return own unless superclass.respond_to?(:sqlite_search_fts5_definitions)
         superclass.sqlite_search_fts5_definitions.merge(own)
+      end
+
+      # The fts5_scope whose against: columns cover every field, preferring the
+      # one with the fewest columns, then declaration order. nil when none does.
+      def sqlite_search_fts5_for(fields)
+        wanted = Array(fields).map(&:to_s)
+        sqlite_search_fts5_definitions.values
+          .select { |definition| (wanted - definition.column_names).empty? }
+          .each_with_index.min_by { |definition, index| [definition.columns.size, index] }
+          &.first
       end
 
       def fts5_scope(name, against:, source: nil, watch: nil)
@@ -22,8 +36,18 @@ module SqliteSearch
         definition = Fts5::Definition.new(model: self, name: name, against: against, source: source, watch: watch)
         (@sqlite_search_fts5_definitions ||= {})[definition.name] = definition
 
-        scope name, ->(query = nil, prefix: false, raw: nil) do
-          match = raw || SqliteSearch::Query.build(query, prefix: prefix)
+        scope name, ->(query = nil, prefix: false, raw: nil, operator: :and, phrase: false, minimum_should_match: nil, columns: nil) do
+          unknown = Array(columns).map(&:to_s) - definition.column_names
+          if unknown.any?
+            raise SqliteSearch::Error, "fts5_scope :#{definition.name} has no column(s) #{unknown.join(", ")}; its columns are #{definition.column_names.join(", ")}."
+          end
+          if raw
+            given = {prefix:, operator:, phrase:, minimum_should_match:, columns:}.reject { |key, value| QUERY_OPTION_DEFAULTS[key] == value }
+            if given.any?
+              raise SqliteSearch::Error, "raw: bypasses the sanitizer, so it can't be combined with #{given.keys.map { |key| "#{key}:" }.join(", ")}."
+            end
+          end
+          match = raw || SqliteSearch::Query.build(query, prefix:, operator:, phrase:, minimum_should_match:, columns:)
           next none.extending(SqliteSearch::Fts5::NullRank) if match.nil? || match.to_s.empty?
 
           fts, pk = with_connection do |conn|
@@ -34,8 +58,8 @@ module SqliteSearch
           # order_by_rank joins the fts table and re-applies MATCH here. It
           # reorders: relevance replaces any order chained before the search.
           rank_module = Module.new do
-            define_method(:order_by_rank) do |threshold: nil|
-              bm25 = with_connection { |conn| definition.bm25_expression(conn) }
+            define_method(:order_by_rank) do |threshold: nil, weights: nil|
+              bm25 = with_connection { |conn| definition.bm25_expression(conn, weights: weights) }
               ranked = joins("JOIN #{fts} ON #{fts}.rowid = #{pk}").where("#{fts} MATCH ?", match)
               ranked = ranked.where("-#{bm25} >= ?", threshold) if threshold
               ranked
@@ -74,6 +98,8 @@ module SqliteSearch
         superclass.sqlite_search_vec_definitions.merge(own)
       end
 
+      def sqlite_search_vec_for(name) = sqlite_search_vec_definitions[name.to_sym]
+
       # sync: :async (enqueue EmbedJob on save), :inline (embed in the save
       # callback), or :manual (never on save; call record.reembed yourself).
       def vec_scope(name, dimensions:, against: nil, source: nil, watch: nil, distance: :cosine, embedder: nil, sync: :async)
@@ -90,10 +116,14 @@ module SqliteSearch
         )
         (@sqlite_search_vec_definitions ||= {})[definition.name] = definition
 
-        scope name, ->(query = nil, k: 20, threshold: nil) do
-          next none if query.nil? || query.to_s.strip.empty?
-
-          vector = definition.embed(query.to_s, record_model: klass)
+        scope name, ->(query = nil, k: 20, threshold: nil, vector: nil) do
+          if vector
+            raise SqliteSearch::Error, "vec_scope :#{definition.name} takes a query or vector:, not both." unless query.nil?
+            vector = definition.check_dimensions(vector)
+          else
+            next none if query.nil? || query.to_s.strip.empty?
+            vector = definition.embed(query.to_s, record_model: klass)
+          end
 
           caller_conditions = all.only(:where, :joins)
           src = quoted_table_name
@@ -185,35 +215,22 @@ module SqliteSearch
         rrf_k = k
         score_method = "#{name}_score"
 
-        scope name, ->(query = nil, limit: 20, rerank: true, fts5_threshold: nil, vec_threshold: nil) do
+        scope name, ->(query = nil, limit: 20, rerank: true, fts5_threshold: nil, vec_threshold: nil, fts5_weight: 1.0, vec_weight: 1.0) do
           next none if query.nil? || query.to_s.strip.empty?
           # candidate pool per arm before fusion; capped so a large limit: can't over-fetch
           pool = [limit * 3, 100].min
 
-          fts_ids = all.public_send(fts5_name, query).order_by_rank(threshold: fts5_threshold).limit(pool).pluck(primary_key)
-          vec_ids = all.public_send(vec_name, query, k: pool, threshold: vec_threshold).pluck(primary_key)
+          # a zero-weight arm is off: not run (no embedder call), not fused
+          fts_ids = fts5_weight.zero? ? [] : all.public_send(fts5_name, query).order_by_rank(threshold: fts5_threshold).limit(pool).pluck(primary_key)
+          vec_ids = vec_weight.zero? ? [] : all.public_send(vec_name, query, k: pool, threshold: vec_threshold).pluck(primary_key)
 
-          fused = SqliteSearch::Hybrid.rrf(fts_ids, vec_ids, k: rrf_k)
+          fused = SqliteSearch::Hybrid.rrf(fts_ids, vec_ids, k: rrf_k, weights: [fts5_weight, vec_weight])
           next none if fused.empty?
 
           reranker = rerank ? SqliteSearch.config.reranker : nil
           fused = SqliteSearch::Hybrid.rerank(query, fused, model: klass, scope_name: name.to_sym, reranker: reranker)
           next none if fused.empty?
-          fused = fused.first(limit)
-          ids = fused.map(&:first)
-          scores = fused.to_h
-          # Fused rank and score come from Ruby, so carry them as SQL: the score
-          # becomes a real <name>_score attribute (works with pluck, first, etc.).
-          # The fused order replaces any order chained before the search.
-          order, score_col = with_connection do |conn|
-            pk_sql = "#{quoted_table_name}.#{conn.quote_column_name(primary_key)}"
-            [
-              Arel.sql(SqliteSearch::Sql.id_case(pk_sql, ids.each_with_index.to_h, conn)),
-              "#{SqliteSearch::Sql.id_case(pk_sql, scores, conn)} AS #{score_method}"
-            ]
-          end
-          where(primary_key => ids).reorder(order).select("#{quoted_table_name}.*, #{score_col}")
-            .extending(SqliteSearch::ScoredRelation)
+          SqliteSearch::Hybrid.relation(all, fused.first(limit), score_method)
         end
       end
     end

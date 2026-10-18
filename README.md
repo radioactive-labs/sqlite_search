@@ -155,6 +155,22 @@ raising. Any string you pass as the positional argument goes through
 strips FTS5 operator syntax, so untrusted input is safe. Reserve `raw:` for
 trusted, internally built expressions.
 
+More options shape the match without giving up sanitizing:
+
+```ruby
+Post.search("coffee", columns: [:title])                 # only the title column
+Post.search("hot coffee", operator: :or)                 # any term (default :and)
+Post.search("flat white", phrase: true)                  # the words as one phrase
+Post.search("coffee tea juice", minimum_should_match: 2) # at least 2 of the terms
+```
+
+`columns:` must name `against:` columns. `minimum_should_match:` takes an
+integer, a negative integer (terms that may be missing), or a percentage
+(`"75%"`), following Elasticsearch's rules. When it needs some but not all of the
+terms, it expands into every n-of-m group of terms, so it accepts at most 6 terms
+and raises `SqliteSearch::Error` beyond that; needing 1 term or all of them works
+with any number of terms.
+
 ### Ranking
 
 By default the scope filters but does not order, so it composes with your own
@@ -171,6 +187,9 @@ before it; chain an `order` after it to add a tiebreaker.
 `order_by_rank(threshold: 8.0)` keeps only rows whose rank is at least the
 threshold. Each ranked record carries a
 `<name>_rank` reader (`search_rank` for a scope named `:search`).
+
+`order_by_rank(weights: { title: 3.0, body: 1.0 })` replaces the `against:`
+weights for one query; columns you leave out weigh 0.
 
 ### Reindexing
 
@@ -283,6 +302,15 @@ is closer). `threshold:` filters by relevance: on a cosine scope it is a minimum
 similarity, on a euclidean or taxicab scope it is a maximum distance. A blank or
 nil query returns `.none`.
 
+If you already have the query's embedding, pass it instead of text and the
+embedder is skipped:
+
+```ruby
+Post.semantic_search(vector: embedding, k: 20)
+```
+
+The vector must have the scope's `dimensions:`; passing both text and `vector:` raises.
+
 Results come back nearest first, replacing any `order` chained before the
 search.
 
@@ -338,6 +366,10 @@ similarity on a cosine scope):
 Post.search("coffee", fts5_threshold: 8.0, vec_threshold: 0.3)
 ```
 
+`fts5_weight:` and `vec_weight:` (default 1.0 each) weight each arm's share of
+the fused score: `Post.search("coffee", fts5_weight: 2.0)` favors keyword matches,
+and a weight of 0 turns that arm off.
+
 ### Reranking
 
 Register a reranker once and every hybrid scope uses it, unless a call opts out:
@@ -370,6 +402,83 @@ column, so it counts as a reranker failure.
 scope name (the same pair is passed to the embedder block). Reranking is
 best-effort: if the block raises, the failure is logged and the search falls back
 to the fused order, so a broken reranker never takes down a search.
+
+## Using with noiseless
+
+[noiseless](https://github.com/seuros/noiseless) is a search DSL with
+Elasticsearch, OpenSearch, Typesense, and PostgreSQL backends. sqlite_search
+ships an opt-in adapter so a noiseless app can run its searches on SQLite.
+noiseless needs Ruby 4.0+ and Rails 8.1+; sqlite_search does not depend on it.
+
+```ruby
+# Gemfile
+gem "noiseless"
+gem "sqlite_search"
+
+# config/initializers/sqlite_search_noiseless.rb
+require "sqlite_search/noiseless"
+```
+
+```yaml
+# config/noiseless.yml
+development:
+  default: primary
+  connections:
+    primary:
+      adapter: sqlite
+      unsupported: strict   # or lax
+```
+
+The table is the index. A search resolves its ActiveRecord model from the index
+name (`index_name "posts"` → `Post`, or `adapter.register_model(Post,
+index_name: "posts")`) and runs that model's sqlite_search scopes:
+
+| noiseless | runs as |
+|---|---|
+| `filter` / `where`, `range` | plain ActiveRecord conditions, applied before every search arm |
+| `sort`, `paginate` | ActiveRecord order and offset/limit on the final result |
+| `match`, `multi_match`, `combined_fields` | the `fts5_scope` whose `against:` covers the fields, ranked by BM25; `LIKE` when none does |
+| `wildcard`, `prefix` | `LIKE` |
+| `vector` / `knn` | the `vec_scope` named by the field, with your embedding |
+| `hybrid` | the covering `fts5_scope` and the named `vec_scope`, fused with weighted RRF |
+
+Writes (`index_document`, `bulk`, ...) are no-ops: your `fts5_scope` and
+`vec_scope` callbacks already keep the indexes current, and `create_index`
+does nothing because migrations create them. `search_raw` (raw Elasticsearch
+bodies) raises `Noiseless::SearchError`.
+
+Text options follow Elasticsearch where FTS5 can: terms are OR-ed by default,
+and `operator` (`and` or `or`; anything else raises), `type` (`phrase`,
+`phrase_prefix`, `bool_prefix`; the `*_fields` types rank alike), field boosts
+(`"title^3"`), `minimum_should_match`, and `zero_terms_query` are honored.
+Past 6 terms, a `minimum_should_match` that needs some but not all terms is reported like an unsupported feature
+(under `lax` it requires every term). On the `LIKE` fallback, `minimum_should_match` is exact when it
+needs one term or all of them; anything in between requires every term and is
+reported like an unsupported feature.
+
+Sorting: `sort(:_score, :desc)` first keeps relevance order and any further sorts
+break its ties; `_score` ascending or after other fields is unsupported (noiseless
+sorts ascending by default, so pass `:desc`). `sort(:_id, ...)` sorts by primary
+key, and a direction other than `asc` or `desc` raises. A range filter
+with a nil bound is open-ended.
+
+**Unsupported features.** By default (`unsupported: strict`) a query that uses
+something SQLite cannot do raises `Noiseless::SearchError`. With `unsupported:
+lax`, a feature whose omission would widen the results (geo filters,
+`search_after`, an inner `join`, a filter on a field that is not a column)
+returns no hits, and one that only decorates the response (aggregations,
+collapse, `fuzziness`, other joins, pipelines, ...) is skipped and logged.
+Fields in `multi_match`, `combined_fields`, and `hybrid` that are not columns
+(or FTS columns of an `fts5_scope`) are dropped before the index is picked and
+reported the same way; if none remain, the field list counts as a feature
+that would widen the results. Configuration
+mistakes, such as a missing `vec_scope` or a `distance_metric` that does not
+match the scope, always raise.
+
+**Known differences from Elasticsearch.** Stemming and tokenizing come from the
+FTS5 tokenizer you chose in the migration, the `LIKE` fallback matches
+substrings, scores are not on Elasticsearch's scale, and fuzzy matching is not
+available.
 
 ## Filtering and multi-tenancy
 
