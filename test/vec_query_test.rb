@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "test_helper"
+require "minitest/mock"
 
 class VecQueryTest < SqliteSearch::TestCase
   def setup
@@ -63,5 +64,27 @@ class VecQueryTest < SqliteSearch::TestCase
 
   def test_nearest_order_overrides_a_preceding_order
     assert_equal [2, 1], @klass.order(:id).semantic("tea").pluck(:id)
+  end
+
+  # stub embedder: "morning coffee" -> [1, 0, 0.14], "green tea" -> [0, 1, 0.09]
+  def test_vector_queries_without_a_query_string
+    assert_equal [1, 2], @klass.semantic(vector: [1.0, 0.0, 0.14]).pluck(:id)
+    assert_equal [1], @klass.semantic(vector: [1.0, 0.0, 0.14], k: 1).pluck(:id)
+  end
+
+  def test_vector_does_not_call_the_embedder
+    definition = @klass.sqlite_search_vec_definitions[:semantic]
+    definition.stub(:embed, ->(*) { flunk "embedder called" }) do
+      assert_equal 2, @klass.semantic(vector: [0.0, 1.0, 0.09]).first.id
+    end
+  end
+
+  def test_query_and_vector_together_raise
+    assert_raises(SqliteSearch::Error) { @klass.semantic("coffee", vector: [1.0, 0.0, 0.1]) }
+  end
+
+  def test_vector_with_wrong_dimensions_raises
+    error = assert_raises(SqliteSearch::Error) { @klass.semantic(vector: [1.0, 0.0]) }
+    assert_equal "vec_scope :semantic expects 3-dimension vectors, got 2.", error.message
   end
 end

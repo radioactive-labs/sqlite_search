@@ -35,3 +35,16 @@ jobs:
       # Resolve fresh against the matrix RAILS_VERSION rather than the committed lock.
       - run: rm -f Gemfile.lock && bundle install
       - run: bundle exec rake test
+
+  noiseless:
+    name: "noiseless adapter (Ruby 4.0 / Rails 8.1)"
+    runs-on: ubuntu-latest
+    env:
+      BUNDLE_GEMFILE: gemfiles/noiseless.gemfile
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "4.0"
+      - run: bundle install
+      - run: bundle exec rake test

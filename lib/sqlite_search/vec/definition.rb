@@ -51,6 +51,12 @@ module SqliteSearch
         vector
       end
 
+      # A caller-supplied vector (vec scope's vector:) must fit the index.
+      def check_dimensions(vector)
+        return vector if vector.length == dimensions
+        raise SqliteSearch::Error, "vec_scope :#{name} expects #{dimensions}-dimension vectors, got #{vector.length}."
+      end
+
       def neighbor_model
         @neighbor_model ||= begin
           tbl = table_name

@@ -1,0 +1,7 @@
+source "https://rubygems.org"
+
+# The noiseless adapter's bundle. noiseless needs Ruby 4.0+ and Rails 8.1+,
+# so it stays out of the gemspec and the main Gemfile.
+gemspec path: ".."
+
+gem "noiseless", "~> 0.8"

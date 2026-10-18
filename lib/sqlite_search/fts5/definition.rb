@@ -34,11 +34,31 @@ module SqliteSearch
       end
 
       # SQLite bm25() returns lower (more negative) = better. We ORDER BY it
-      # ascending, and expose -bm25 as the rank so higher = better.
-      def bm25_expression(connection)
+      # ascending, and expose -bm25 as the rank so higher = better. weights:
+      # (from order_by_rank) replaces the against: weights for one query.
+      def bm25_expression(connection, weights: nil)
         args = [connection.quote_table_name(table_name)]
-        args.concat(table_weights(connection).map { |w| format("%g", w) }) if weights
+        column_weights = if weights
+          query_weights(connection, weights)
+        elsif self.weights
+          table_weights(connection)
+        end
+        args.concat(column_weights.map { |w| format("%g", w) }) if column_weights
         "bm25(#{args.join(", ")})"
+      end
+
+      # Per-query weights keyed by FTS column, lined up by table position.
+      # Columns left out weigh 0, so they stop contributing to the rank.
+      def query_weights(connection, weights)
+        by_column = weights.to_h { |column, weight| [column.to_s, Float(weight)] }
+        unknown = by_column.keys - column_names
+        if unknown.any?
+          raise SqliteSearch::Error, "fts5_scope :#{name} has no column(s) #{unknown.join(", ")} to weight; its columns are #{column_names.join(", ")}."
+        end
+        if by_column.values.any? { |weight| !weight.finite? || weight.negative? }
+          raise SqliteSearch::Error, "fts5_scope :#{name} weights must be finite and non-negative, got #{weights.inspect}."
+        end
+        connection.columns(table_name).map { |c| by_column.fetch(c.name, 0.0) }
       end
 
       # bm25() takes weights by the FTS table's column position, which need not
